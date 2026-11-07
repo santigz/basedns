@@ -14,7 +14,6 @@ import re
 
 from datetime import datetime, timedelta
 from typing import Dict
-from datetime import datetime
 from jinja2 import Environment, FileSystemLoader
 from pathlib import Path
 
@@ -23,6 +22,7 @@ from .named_manager import NamedManager, NamedCheckConfError, NamedCheckZoneErro
 # Bind globals
 BIND_DIR = '/etc/bind/'
 MAIN_ZONE_FILE = '/etc/bind/main-zone'
+NAMED_CONF_LOCAL_FILE = '/etc/bind/named.conf.local'
 CUSTOM_RRS_FILE = '/etc/bind/custom-records'
 USER_ZONES_DIR = '/etc/bind/user-zones/'
 USER_TOKENS_DIR = '/etc/bind/user-tokens/'
@@ -73,8 +73,8 @@ class ZoneManager(object):
             self.origin += '.'
         logger.info(f'ORIGIN {self.origin}')
         self.jinja_env = Environment(loader=FileSystemLoader(TEMPLATES_DIR))
-        Path(USER_ZONES_DIR).mkdir(exist_ok=True)
-        Path(USER_TOKENS_DIR).mkdir(exist_ok=True)
+        Path(USER_ZONES_DIR).mkdir(parents=True, exist_ok=True)
+        Path(USER_TOKENS_DIR).mkdir(parents=True, exist_ok=True)
         bind_failed = False
         try:
             NamedManager.check_and_run(self.origin, MAIN_ZONE_FILE)
@@ -84,7 +84,7 @@ class ZoneManager(object):
             logger.error(f'ERROR in named-checkconf!!!!!!\n{e}')
         except NamedCheckZoneError as e:
             bind_failed = True
-            contents = Path(MAIN_ZONE_FILE).read_text()
+            contents = Path(MAIN_ZONE_FILE).read_text() if Path(MAIN_ZONE_FILE).exists() else '<file not found>'
             logger.error(f'Main zone file:\n{contents}')
             logger.error(f'ERROR in named-checkzone in main zone!!!!!!\n{e}')
         if bind_failed:
@@ -132,7 +132,7 @@ class ZoneManager(object):
     #         logger.error(f"Error reading zone file: {e}")
 
     def user_zone_origin(self, username):
-        return username + '.' + self.origin;
+        return username + '.' + self.origin
 
     def get_user_zonefile(self, username: str) -> str:
         zonefile = Path(USER_ZONES_DIR) / username
@@ -184,15 +184,20 @@ class ZoneManager(object):
     def replace_zone_if_reloads(self, tmp_zonefile: Path, username: str) -> None:
         zonefile = Path(USER_ZONES_DIR) / username
         zonefile_backup = zonefile.with_suffix('.orig')
-        shutil.copy2(zonefile, zonefile_backup)
+        if zonefile.exists():
+            shutil.copy2(zonefile, zonefile_backup)
         tmp_zonefile.replace(zonefile)
         try:
             NamedManager.reload()
-            zonefile_backup.unlink()
+            zonefile_backup.unlink(missing_ok=True)
         except NamedReloadError:
             contents = zonefile.read_text()
             logger.error(f'Passed named-checkzone but reload error for user {username}:\n{contents}')
-            shutil.copy2(zonefile_backup, zonefile)
+            if zonefile_backup.exists():
+                shutil.copy2(zonefile_backup, zonefile)
+                zonefile_backup.unlink(missing_ok=True)
+            else:
+                zonefile.unlink(missing_ok=True)
             try:
                 NamedManager.reload()
             except NamedReloadError:
@@ -200,10 +205,13 @@ class ZoneManager(object):
                 raise
             raise
 
-    def reset_user_zonefile(self, username: str) -> None:
+    def reset_user_zonefile(self, username: str) -> str:
         origin = username + '.' + self.origin
         zonefile = Path(USER_ZONES_DIR) / username
-        self.reset_zonefile(origin, USER_ZONE_TEMPLATE, zonefile)
+        zone = self.reset_zonefile(origin, USER_ZONE_TEMPLATE, zonefile)
+        if NamedManager.named_pid():
+            NamedManager.reload()
+        return zone
 
     def custom_records(self):
         try:
@@ -211,7 +219,9 @@ class ZoneManager(object):
         except:
             return ''
 
-    def reset_zonefile(self, origin: str, zone_template: str, zonefile: str|Path, user_list: list[str] = []) -> str:
+    def reset_zonefile(self, origin: str, zone_template: str, zonefile: str|Path, user_list: list[str] | None = None) -> str:
+        if user_list is None:
+            user_list = []
         logger.info(f'Resetting zone {zonefile}')
         if not self.public_ip:
             raise ZoneCreationError('No public IP')
@@ -241,6 +251,8 @@ class ZoneManager(object):
                                 'origin': self.origin, 
                                 'user_list': user_list,
                             })
+        if NamedManager.named_pid():
+            NamedManager.reload()
 
 
     # def reset_bind_conf_users(self, template_file: str, conf_file: str, user_list: list[str]) -> None:
@@ -257,13 +269,14 @@ class ZoneManager(object):
     def reset_all_user_zonefiles(self) -> None:
         '''Remove all user zone files and create new ones for user_list'''
         users_dir = USER_ZONES_DIR
+        user_list = self.find_user_list()
         logger.info(f'Resetting user zones dir {users_dir}')
         try:
             shutil.rmtree(users_dir)
             os.mkdir(users_dir)
         except Exception as e:
             logger.error(f'Error resetting user zone dir {users_dir}: {e}')
-        for user in self.find_user_list():
+        for user in user_list:
             self.reset_user_zonefile(user)
 
     def get_public_ip(self) -> str | None:
@@ -311,12 +324,16 @@ class ZoneManager(object):
         bkp_dir = Path(BACKUPS_DIR) / timestamp
         try:
             bkp_dir.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(MAIN_ZONE_FILE, bkp_dir)
-            shutil.copy2(CUSTOM_RRS_FILE, bkp_dir)
-            shutil.copytree(USER_ZONES_DIR, bkp_dir)
-            shutil.copy2('/etc/bind/named.conf.local', bkp_dir)
-        except Exception:
-            logger.error(f'Failed backup {bkp_dir}.')
+            if Path(MAIN_ZONE_FILE).exists():
+                shutil.copy2(MAIN_ZONE_FILE, bkp_dir)
+            if Path(CUSTOM_RRS_FILE).exists():
+                shutil.copy2(CUSTOM_RRS_FILE, bkp_dir)
+            if Path(USER_ZONES_DIR).exists():
+                shutil.copytree(USER_ZONES_DIR, bkp_dir / 'user-zones', dirs_exist_ok=True)
+            if Path(NAMED_CONF_LOCAL_FILE).exists():
+                shutil.copy2(NAMED_CONF_LOCAL_FILE, bkp_dir)
+        except Exception as e:
+            logger.error(f'Failed backup {bkp_dir}: {e}')
 
     def zone_data_updating_record_a(self, username: str, hostname: str, ip: str, ttl=None) -> str:
         # logger.info(f'Updating record for user {username}: {hostname} {ip} {ttl}')
@@ -325,19 +342,19 @@ class ZoneManager(object):
             logger.error(f'Failed updating record: zone file does not exist for user {username}')
             raise RecordUpdateError('Zone file does not exist')
         zone_lines = zonefile.read_text().splitlines()
-        pattern = re.compile(rf'^{hostname}\s+(\d+\s+)?IN\s+A\s+\d+\.\d+\.\d+\.\d+')
+        pattern = re.compile(rf'^{re.escape(hostname)}\s+(\d+\s+)?IN\s+A\s+\d+\.\d+\.\d+\.\d+')
         record_found = False
         updated_zone_data = []
         ttl = f'{ttl}\t' if ttl else ''
         for line in zone_lines:
             if pattern.match(line):
-                updated_zone_data.append(f'{hostname}\t{ttl}IN\tA\t{ip}\n')
+                updated_zone_data.append(f'{hostname}\t{ttl}IN\tA\t{ip}')
                 record_found = True
             else:
                 updated_zone_data.append(line)
         if not record_found:
-            updated_zone_data.append(f'{hostname}\t{ttl}IN\tA\t{ip}\n')
-            updated_zone_data.append('') # Ending newline mandatory for zone records
+            updated_zone_data.append(f'{hostname}\t{ttl}IN\tA\t{ip}')
+        updated_zone_data.append('') # Ending newline mandatory for zone records
         return '\n'.join(updated_zone_data)
 
     def update_a_record(self, username: str, hostname: str, ip: str, ttl=None) -> None:

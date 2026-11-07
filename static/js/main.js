@@ -58,7 +58,6 @@ function zone_table_row(type, name, value, ttl, zone_ttl, id, deletable = true) 
   } else {
     html += ` <td class="text-end">
                   <small class="text-body-secondary">Not deletable</small>
-                </button>
               </td>`;
   }
   html += '</tr>';
@@ -122,13 +121,16 @@ function update_zonefile(zone_text) {
       .then(response => {
         if (response.ok) {
           resolve({ success: true, msg: 'Success' });
+          return null;
         } else {
           return response.json();
         }
       })
       .then(update_msg => {
-        msg = update_msg.detail.message.replace(/\\n/g, '\n'); // Fix newlines
-        reject({ success: false, type: update_msg.detail.error, message: msg });
+        if (update_msg) {
+          msg = update_msg.detail.message.replace(/\\n/g, '\n'); // Fix newlines
+          reject({ success: false, type: update_msg.detail.error, message: msg });
+        }
       })
       .catch(error => {
         msg = error + '\n Reloading page in 5 seconds...';
@@ -244,10 +246,14 @@ function rebuild_zone_table() {
   if ('srv' in zone) {
     for (const rr of zone['srv']) {
       rr.id = rr_id++;
-      rows_html += zone_table_row('SRV', rr['name'], rr['txt'], rr['ttl'], zone_ttl, rr.id);
+      value = `${rr['priority']} ${rr['weight']} ${rr['port']} ${rr['target']}`;
+      rows_html += zone_table_row('SRV', rr['name'], value, rr['ttl'], zone_ttl, rr.id);
     }
   }
   tbody.innerHTML = rows_html;
+  tbody.querySelectorAll(".copy-fqdn").forEach(element => {
+    element.addEventListener("click", () => copy_fqdn(element));
+  });
 }
 
 
@@ -376,7 +382,7 @@ function create_record_mx(button) {
 function create_record_txt(button) {
   const rr = {
     'name': toASCII(document.getElementById("txt-name").value),
-    'txt': toASCII(document.getElementById("txt-value").value),
+    'txt': document.getElementById("txt-value").value,
     'ttl': document.getElementById("txt-ttl").value,
   }
   create_record_generic(button, 'txt', rr);
@@ -629,13 +635,6 @@ function copy_fqdn(element) {
     })
     .catch(err => console.error("Could not copy text: ", err));
 }
-
-document.addEventListener('DOMContentLoaded', function() {
-  // Apply click event to each element with the class 'copy-to-clipboard'
-  document.querySelectorAll(".copy-fqdn").forEach(element => {
-    element.addEventListener("click", () => copy_fqdn(element));
-  });
-});
 
 
 function reset_zone() {

@@ -1,15 +1,12 @@
 import logging
 
-from fastapi import FastAPI, Request, HTTPException, status, Security
+from fastapi import FastAPI, Request, HTTPException, status, Security, Query
 from fastapi.responses import HTMLResponse, PlainTextResponse, JSONResponse
 from fastapi.security import APIKeyHeader, APIKeyQuery
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from pydantic_settings import BaseSettings
-
-from fastapi import FastAPI, Query, Body, HTTPException
-from pydantic import BaseModel, Field
 from typing import Optional
 
 from .dns_manager import ZoneManager, BadZoneFile, RecordUpdateError
@@ -77,8 +74,8 @@ async def read_headers(request: Request):
 
 @app.get('/zonefile', response_class=PlainTextResponse)
 def read_user_zone(request: Request):
+    username = check_user(request)
     try:
-        username = check_user(request)
         zone = zonemgr.get_user_zonefile(username)
         return zone
     except Exception as e:
@@ -100,14 +97,14 @@ async def set_user_zone(request: Request):
     except Exception as e:
         logger.error(f'Exception setting zone file for {username}:\n{str(e)}')
         # logger.error(traceback.print_exc())
-        raise HTTPException(status_code=402, detail={'error': 'Internal error', 'message': str(e)})
+        raise HTTPException(status_code=500, detail={'error': 'Internal error', 'message': str(e)})
 
 
 @app.post('/reset_zonefile', response_class=PlainTextResponse)
 def reset_zone(request: Request):
     username = check_user(request)
     try:
-        zonemgr.reset_user_zonefile(username)
+        return zonemgr.reset_user_zonefile(username)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -136,7 +133,7 @@ async def update_dns(
         ):
     username = zonemgr.find_user_for_token(api_key)
     if not username:
-        return HTTPException(status_code=200, detail='Bad token')
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Bad token')
     if not ip:
         if 'x-real-ip' in request.headers:
             # If we are behind a reverse proxy
