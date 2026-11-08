@@ -10,6 +10,7 @@ import os
 import requests
 import secrets
 import shutil
+import tarfile
 import re
 
 from datetime import datetime, timedelta
@@ -21,17 +22,19 @@ from .named_manager import NamedManager, NamedCheckConfError, NamedCheckZoneErro
 
 # Bind globals
 BIND_DIR = '/etc/bind/'
+NAMED_INITIALIZATION_TAG = 'named_initialized: true'
 MAIN_ZONE_FILE = '/etc/bind/main-zone'
 NAMED_CONF_LOCAL_FILE = '/etc/bind/named.conf.local'
 CUSTOM_RRS_FILE = '/etc/bind/custom-records'
 USER_ZONES_DIR = '/etc/bind/user-zones/'
 USER_TOKENS_DIR = '/etc/bind/user-tokens/'
-BACKUPS_DIR = '/etc/bind/backups/'
+BACKUPS_DIR = '/etc/bind-backups/'
 
 # Templates globals
 TEMPLATES_DIR = 'templates/bind/'
 ZONEFILE_TEMPLATE = 'main-zone.j2'
 NAMED_CONF_TEMPLATE = 'named.conf.j2'
+NAMED_CONF_OPTIONS_TEMPLATE = 'named.conf.options.j2'
 NAMED_CONF_LOCAL_TEMPLATE = 'named.conf.local.j2'
 NAMED_CONF_RNDC_TEMPLATE = 'named.conf.rndc.j2'
 RNDC_CONF_TEMPLATE = 'rndc.conf.j2'
@@ -73,8 +76,17 @@ class ZoneManager(object):
             self.origin += '.'
         logger.info(f'ORIGIN {self.origin}')
         self.jinja_env = Environment(loader=FileSystemLoader(TEMPLATES_DIR))
-        Path(USER_ZONES_DIR).mkdir(parents=True, exist_ok=True)
-        Path(USER_TOKENS_DIR).mkdir(parents=True, exist_ok=True)
+        named_conf = Path(BIND_DIR) / 'named.conf'
+        if not named_conf.exists() or NAMED_INITIALIZATION_TAG not in named_conf.read_text():
+            logger.info('Named configuration is uninitialized. Resetting named configuration.')
+            self.delete_all_named_config()
+            Path(USER_ZONES_DIR).mkdir(parents=True, exist_ok=True)
+            Path(USER_TOKENS_DIR).mkdir(parents=True, exist_ok=True)
+            self.full_reset()
+        else:
+            Path(USER_ZONES_DIR).mkdir(parents=True, exist_ok=True)
+            Path(USER_TOKENS_DIR).mkdir(parents=True, exist_ok=True)
+
         bind_failed = False
         try:
             NamedManager.check_and_run(self.origin, MAIN_ZONE_FILE)
@@ -110,10 +122,12 @@ class ZoneManager(object):
         return self._public_ip
 
     def full_reset(self) -> None:
+        self.write_template(NAMED_CONF_TEMPLATE, BIND_DIR, {})
+        self.write_template(NAMED_CONF_OPTIONS_TEMPLATE, BIND_DIR, {})
+        self.reset_rndc()
         self.reset_main_zone()
         self.reset_all_user_zonefiles()
-        self.reset_bind_conf()
-        self.reset_rndc()
+        self.reset_named_conf_local()
 
     # def load_root_zone(self) -> None:
     #     self.root = dns.zone.from_file(MAIN_ZONE_FILE, relativize=False)
@@ -139,7 +153,7 @@ class ZoneManager(object):
         if not zonefile.exists():
             logger.info(f'Zone file does not exist for user: {username}')
             self.reset_user_zonefile(username)
-            self.reset_bind_conf()
+            self.reset_named_conf_local()
         return zonefile.read_text()
 
     # def zonefile_to_json(self, zonefile: str):
@@ -241,7 +255,7 @@ class ZoneManager(object):
             raise ZoneCreationError()
 
 
-    def reset_bind_conf(self) -> None:
+    def reset_named_conf_local(self) -> None:
         '''Reads all user names from `users_dir` and resets bind config config for their zones.'''
         user_list = self.find_user_list()
         # self.reset_bind_conf_users(NAMED_CONF_LOCAL_TEMPLATE, NAMED_CONF_LOCAL_FILE, user_list)
@@ -317,23 +331,33 @@ class ZoneManager(object):
         data = {'rndc_secret': rndc_secret}
         self.write_template(RNDC_CONF_TEMPLATE, BIND_DIR, data)
         self.write_template(NAMED_CONF_RNDC_TEMPLATE, BIND_DIR, data)
-        self.write_template(NAMED_CONF_TEMPLATE, BIND_DIR, {})
 
-    def backup(self):
+    def delete_all_named_config(self) -> None:
+        self.backup()
+        for item in Path(BIND_DIR).iterdir():
+            try:
+                if item.is_dir() and not item.is_symlink():
+                    shutil.rmtree(item)
+                else:
+                    item.unlink()
+            except Exception as e:
+                logger.error(f'Failed deleting {item}: {e}')
+
+    def backup(self) -> str | None:
+        Path(BACKUPS_DIR).mkdir(parents=True, exist_ok=True)
         timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
-        bkp_dir = Path(BACKUPS_DIR) / timestamp
+        tar_filename = f'bind-{timestamp}.tar.gz'
+        backup_file = Path(BACKUPS_DIR) / tar_filename
         try:
-            bkp_dir.mkdir(parents=True, exist_ok=True)
-            if Path(MAIN_ZONE_FILE).exists():
-                shutil.copy2(MAIN_ZONE_FILE, bkp_dir)
-            if Path(CUSTOM_RRS_FILE).exists():
-                shutil.copy2(CUSTOM_RRS_FILE, bkp_dir)
-            if Path(USER_ZONES_DIR).exists():
-                shutil.copytree(USER_ZONES_DIR, bkp_dir / 'user-zones', dirs_exist_ok=True)
-            if Path(NAMED_CONF_LOCAL_FILE).exists():
-                shutil.copy2(NAMED_CONF_LOCAL_FILE, bkp_dir)
+            with tarfile.open(backup_file, 'w:gz') as tar:
+                if Path(BIND_DIR).exists():
+                    for item in Path(BIND_DIR).iterdir():
+                        tar.add(item, arcname=item.name)
+            logger.info(f'Backup created: {tar_filename}')
+            return tar_filename
         except Exception as e:
-            logger.error(f'Failed backup {bkp_dir}: {e}')
+            logger.error(f'Failed backup {backup_file}: {e}')
+            return None
 
     def zone_data_updating_record_a(self, username: str, hostname: str, ip: str, ttl=None) -> str:
         # logger.info(f'Updating record for user {username}: {hostname} {ip} {ttl}')

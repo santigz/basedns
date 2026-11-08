@@ -19,6 +19,8 @@ services:
     volumes:
       - .:/code
       - dns-platform-bind:/etc/bind
+      - dns-platform-bind-backups:/etc/bind-backups
 
 volumes:
   dns-platform-bind:
+  dns-platform-bind-backups:
