@@ -11,15 +11,40 @@ var user_origin;
 var zone;
 
 
+function escape_html(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function safe_to_unicode(domain) {
+  try {
+    return toUnicode(domain);
+  } catch (e) {
+    return domain;
+  }
+}
+
+function safe_to_ascii(domain) {
+  try {
+    return toASCII(domain);
+  } catch (e) {
+    return '';
+  }
+}
+
 function ttl_html(ttl, zone_ttl) {
   if (ttl === undefined) {
     if (zone_ttl === undefined) {
       return '&nbsp;';
     } else {
-      return `<small class="text-body-secondary">${zone_ttl} (default)</small>`;
+      return `<small class="text-body-secondary">${escape_html(zone_ttl)} (default)</small>`;
     }
   } else {
-    return ttl;
+    return escape_html(ttl);
   }
 }
 
@@ -34,24 +59,30 @@ function ttl_html(ttl, zone_ttl) {
   * @param {string} [name="zone_ttl"] - Global $TTL of the zone, used when record's TTL is unknown.
   * @returns {string} HTML code for the table row.
   */
-function zone_table_row(type, name, value, ttl, zone_ttl, id, deletable = true) {
-  type = type ?? '&nbsp;';
-  name = name ?? '&nbsp;';
-  if (name != '@') {
-    name = toUnicode(name);
+function zone_table_row(type, name, value, ttl, zone_ttl, id, deletable = true, is_default_at = false) {
+  const safe_type = type ? escape_html(type) : '&nbsp;';
+  let name_html;
+  if (is_default_at) {
+    name_html = '<small class="text-body-secondary">@</small>';
+  } else if (name === undefined || name === null) {
+    name_html = '&nbsp;';
+  } else if (name === '@') {
+    name_html = '@';
+  } else {
+    name_html = escape_html(safe_to_unicode(name));
   }
-  value = value ?? '&nbsp;';
-  ttl_show = ttl_html(ttl, zone_ttl)
-  html = `
+  const safe_value = value ?? '&nbsp;';
+  const ttl_show = ttl_html(ttl, zone_ttl);
+  let html = `
           <tr>
-              <th scope="row">${type}</th>
-              <td class="copy-fqdn"><span class="name">${name}</span><span class="copy-fqdn-hint text-primary">copy FQDN</span></td>
-              <td>${value}</td>
+              <th scope="row">${safe_type}</th>
+              <td class="copy-fqdn"><span class="name">${name_html}</span><span class="copy-fqdn-hint text-primary">copy FQDN</span></td>
+              <td>${safe_value}</td>
               <td>${ttl_show}</td>
         `;
   if (deletable) {
     html += ` <td class="text-end">
-                  <button class="btn btn-sm btn-outline-danger" rr_id="${id}" onclick="delete_rr(this)">
+                  <button class="btn btn-sm btn-outline-danger" rr_id="${escape_html(id)}" onclick="delete_rr(this)">
                   <i class="bi bi-trash"></i> Delete
                 </button>
               </td>`;
@@ -93,9 +124,14 @@ function current_date_id() {
 }
 
 
-function next_soa_serial() {
+function next_soa_serial(current_serial) {
   const currentDate = new Date();
-  return Math.floor(currentDate.getTime() / 1000);
+  const now_sec = Math.floor(currentDate.getTime() / 1000);
+  const prev = parseInt(current_serial, 10);
+  if (!isNaN(prev) && prev >= now_sec) {
+    return prev + 1;
+  }
+  return now_sec;
 }
 // function next_soa_serial(serial) {
 //   const num_str = String(serial);
@@ -128,12 +164,19 @@ function update_zonefile(zone_text) {
       })
       .then(update_msg => {
         if (update_msg) {
-          msg = update_msg.detail.message.replace(/\\n/g, '\n'); // Fix newlines
-          reject({ success: false, type: update_msg.detail.error, message: msg });
+          const detail = update_msg.detail;
+          const raw_msg = (typeof detail === 'object' && detail !== null && detail.message)
+            ? detail.message
+            : (typeof detail === 'string' ? detail : JSON.stringify(detail));
+          const err_type = (typeof detail === 'object' && detail !== null && detail.error)
+            ? detail.error
+            : 'Error';
+          const msg = String(raw_msg).replace(/\\n/g, '\n'); // Fix newlines
+          reject({ success: false, type: err_type, message: msg });
         }
       })
       .catch(error => {
-        msg = error + '\n Reloading page in 5 seconds...';
+        const msg = error + '\n Reloading page in 5 seconds...';
         reject({ success: false, type: 'Network error', message: msg });
         // Suele ser error de fin de sesión. Recargamos por si pide login.
         // TODO: sólo recargar si el usuario ha perdido sesión. Me falla por problemas CORS que no consigo resolver.
@@ -157,10 +200,10 @@ function remove_rr_update_alerts() {
   */
 function rebuild_zone(button, new_zone) {
   remove_rr_update_alerts();
-  if ('soa' in new_zone) {
-    new_zone['soa']['serial'] = next_soa_serial();
+  if ('soa' in new_zone && new_zone['soa']) {
+    new_zone['soa']['serial'] = next_soa_serial(new_zone['soa']['serial']);
   }
-  new_zone_text = generate(new_zone);
+  const new_zone_text = generate(new_zone);
 
   return new Promise((resolve, reject) => {
     update_zonefile(new_zone_text)
@@ -168,7 +211,7 @@ function rebuild_zone(button, new_zone) {
         zone = new_zone;
         rebuild_zone_table();
         const zone_file = document.getElementById("zone-file");
-        zone_file.innerHTML = generate(zone);
+        zone_file.textContent = new_zone_text;
         resolve();
       })
       .catch(error => {
@@ -178,11 +221,16 @@ function rebuild_zone(button, new_zone) {
 }
 
 function is_rr_deletable(type, rr, soa) {
-  soa_ns = soa.mname.split('.')[0];
-  if (type == 'ns' && rr.name == '@' && rr.host == soa_ns) {
+  if (!soa || !soa.mname) {
+    return true;
+  }
+  const soa_ns = soa.mname.split('.')[0];
+  const rr_name = rr.name || '@';
+  const rr_host_short = rr.host ? rr.host.split('.')[0] : '';
+  if (type == 'ns' && rr_name == '@' && (rr.host == soa_ns || rr.host == soa.mname || rr_host_short == soa_ns)) {
     return false;
   }
-  if (type == 'a' && rr.name == soa_ns) {
+  if (type == 'a' && rr_name == soa_ns) {
     return false;
   }
   return true;
@@ -201,52 +249,52 @@ function rebuild_zone_table() {
   if ('ns' in zone) {
     for (const rr of zone['ns']) {
       rr.id = rr_id++;
-      if (!('name' in rr)) {
-        rr_name = '<small class="text-body-secondary">@</small>';
-      } else {
-        rr_name = rr['name'];
-      }
-      deletable = is_rr_deletable('ns', rr, zone.soa);
-      rows_html += zone_table_row('NS', rr_name, rr['host'], rr['ttl'], zone_ttl, rr.id, deletable);
+      const is_default_at = !('name' in rr);
+      const rr_name = is_default_at ? '@' : rr['name'];
+      const deletable = is_rr_deletable('ns', rr, zone.soa);
+      const host_display = escape_html(safe_to_unicode(rr['host'] || ''));
+      rows_html += zone_table_row('NS', rr_name, host_display, rr['ttl'], zone_ttl, rr.id, deletable, is_default_at);
     }
   }
   if ('a' in zone) {
     for (const rr of zone['a']) {
       rr.id = rr_id++;
-      deletable = is_rr_deletable('a', rr, zone.soa);
-      rows_html += zone_table_row('A', rr['name'], rr['ip'], rr['ttl'], zone_ttl, rr.id, deletable);
+      const deletable = is_rr_deletable('a', rr, zone.soa);
+      rows_html += zone_table_row('A', rr['name'], escape_html(rr['ip'] ?? ''), rr['ttl'], zone_ttl, rr.id, deletable);
     }
   }
   if ('aaaa' in zone) {
     for (const rr of zone['aaaa']) {
       rr.id = rr_id++;
-      deletable = is_rr_deletable('aaaa', rr, zone.soa);
-      rows_html += zone_table_row('AAAA', rr['name'], rr['ip'], rr['ttl'], zone_ttl, rr.id, deletable);
+      const deletable = is_rr_deletable('aaaa', rr, zone.soa);
+      rows_html += zone_table_row('AAAA', rr['name'], escape_html(rr['ip'] ?? ''), rr['ttl'], zone_ttl, rr.id, deletable);
     }
   }
   if ('cname' in zone) {
     for (const rr of zone['cname']) {
       rr.id = rr_id++;
-      rows_html += zone_table_row('CNAME', rr['name'], rr['alias'], rr['ttl'], zone_ttl, rr.id);
+      const alias_display = escape_html(safe_to_unicode(rr['alias'] || ''));
+      rows_html += zone_table_row('CNAME', rr['name'], alias_display, rr['ttl'], zone_ttl, rr.id);
     }
   }
   if ('mx' in zone) {
     for (const rr of zone['mx']) {
       rr.id = rr_id++;
-      value = `<span class="badge text-bg-secondary">${rr['preference']}</span> ${rr['host']}`;
+      const host_display = escape_html(safe_to_unicode(rr['host'] || ''));
+      const value = `<span class="badge text-bg-secondary">${escape_html(rr['preference'] ?? '')}</span> ${host_display}`;
       rows_html += zone_table_row('MX', rr['name'], value, rr['ttl'], zone_ttl, rr.id);
     }
   }
   if ('txt' in zone) {
     for (const rr of zone['txt']) {
       rr.id = rr_id++;
-      rows_html += zone_table_row('TXT', rr['name'], rr['txt'], rr['ttl'], zone_ttl, rr.id);
+      rows_html += zone_table_row('TXT', rr['name'], escape_html(rr['txt'] ?? ''), rr['ttl'], zone_ttl, rr.id);
     }
   }
   if ('srv' in zone) {
     for (const rr of zone['srv']) {
       rr.id = rr_id++;
-      value = `${rr['priority']} ${rr['weight']} ${rr['port']} ${rr['target']}`;
+      const value = `${escape_html(rr['priority'] ?? '')} ${escape_html(rr['weight'] ?? '')} ${escape_html(rr['port'] ?? '')} ${escape_html(safe_to_unicode(rr['target'] || ''))}`;
       rows_html += zone_table_row('SRV', rr['name'], value, rr['ttl'], zone_ttl, rr.id);
     }
   }
@@ -272,13 +320,17 @@ document.addEventListener('DOMContentLoaded', function() {
 // Live preview for name input with suffix ".example.com"
 document.querySelectorAll('input[preview$="true"]').forEach(input => {
   input.addEventListener('input', (e) => {
-    validate_hostname(input);
+    validate_input(input);
     const preview = document.getElementById(`${e.target.id}-preview`);
     if (e.target.value == '@') {
-      preview.textContent = user_origin;
+      if (input.classList.contains('nameserver-validation') || input.classList.contains('cname-hostname-validation')) {
+        preview.textContent = '\xa0';
+      } else {
+        preview.textContent = user_origin;
+      }
       return;
     }
-    const name = toASCII(e.target.value);
+    const name = safe_to_ascii(e.target.value.trim());
     if (!name) {
       preview.textContent = '\xa0';
       return;
@@ -344,75 +396,92 @@ document.querySelectorAll('input[preview$="true"]').forEach(input => {
 
 function create_record_a(button) {
   const rr = {
-    'name': toASCII(document.getElementById("a-name").value),
-    'ip': document.getElementById("a-ip").value,
-    'ttl': document.getElementById("a-ttl").value,
+    'name': safe_to_ascii(document.getElementById("a-name").value.trim()),
+    'ip': document.getElementById("a-ip").value.trim(),
+    'ttl': document.getElementById("a-ttl").value.trim(),
   }
   create_record_generic(button, 'a', rr);
 }
 
 function create_record_aaaa(button) {
   const rr = {
-    'name': toASCII(document.getElementById("aaaa-name").value),
-    'ip': document.getElementById("aaaa-ip").value,
-    'ttl': document.getElementById("aaaa-ttl").value,
+    'name': safe_to_ascii(document.getElementById("aaaa-name").value.trim()),
+    'ip': document.getElementById("aaaa-ip").value.trim(),
+    'ttl': document.getElementById("aaaa-ttl").value.trim(),
   }
   create_record_generic(button, 'aaaa', rr);
 }
 
 function create_record_cname(button) {
   const rr = {
-    'name': toASCII(document.getElementById("cname-name").value),
-    'alias': document.getElementById("cname-alias").value,
-    'ttl': document.getElementById("cname-ttl").value,
+    'name': safe_to_ascii(document.getElementById("cname-name").value.trim()),
+    'alias': safe_to_ascii(document.getElementById("cname-alias").value.trim()),
+    'ttl': document.getElementById("cname-ttl").value.trim(),
   }
   create_record_generic(button, 'cname', rr);
 }
 
 function create_record_mx(button) {
   const rr = {
-    'name': toASCII(document.getElementById("mx-name").value),
-    'host': document.getElementById("mx-host").value,
-    'preference': document.getElementById("mx-priority").value,
-    'ttl': document.getElementById("mx-ttl").value,
+    'name': safe_to_ascii(document.getElementById("mx-name").value.trim()),
+    'host': safe_to_ascii(document.getElementById("mx-host").value.trim()),
+    'preference': document.getElementById("mx-priority").value.trim(),
+    'ttl': document.getElementById("mx-ttl").value.trim(),
   }
   create_record_generic(button, 'mx', rr);
 }
 
 function create_record_txt(button) {
   const rr = {
-    'name': toASCII(document.getElementById("txt-name").value),
-    'txt': document.getElementById("txt-value").value,
-    'ttl': document.getElementById("txt-ttl").value,
+    'name': safe_to_ascii(document.getElementById("txt-name").value.trim()),
+    'txt': document.getElementById("txt-value").value.trim(),
+    'ttl': document.getElementById("txt-ttl").value.trim(),
   }
   create_record_generic(button, 'txt', rr);
 }
 
 function create_record_ns(button) {
   const rr = {
-    'name': toASCII(document.getElementById("ns-name").value),
-    'host': document.getElementById("ns-nameserver").value,
-    'ttl': document.getElementById("ns-ttl").value,
+    'name': safe_to_ascii(document.getElementById("ns-name").value.trim()),
+    'host': safe_to_ascii(document.getElementById("ns-nameserver").value.trim()),
+    'ttl': document.getElementById("ns-ttl").value.trim(),
   }
   create_record_generic(button, 'ns', rr);
 }
 
+function show_rr_error(anchor_element, heading, error) {
+  const html_error = `
+    <div class="row mt-1 new-rr-update-msg">
+    <div class="col">
+      <div class="alert alert-danger" role="alert">
+        <h5 class="alert-heading">${escape_html(heading)}</h5>
+        <pre>${escape_html(error.type ?? 'Error')}</pre>
+        <hr>
+        <pre class="mb-0">${escape_html(error.message ?? String(error))}</pre>
+      </div>
+    </div>
+    </div>
+    `;
+  const div = document.createElement('div');
+  div.innerHTML = html_error;
+  anchor_element.insertAdjacentElement("afterend", div.firstElementChild);
+}
 
 function create_record_generic(button, type, rr_dict) {
   if (!zone) { return; }
   if (!check_button(button)) {
     return;
   }
-  rr = {};
+  const rr = {};
   for (let key in rr_dict) {
-    if (rr_dict[key]) {
+    if (rr_dict[key] !== undefined && rr_dict[key] !== null && rr_dict[key] !== '') {
       rr[key] = rr_dict[key];
     }
   }
   if (Object.keys(rr).length == 0) {
     return;
   }
-  new_zone = structuredClone(zone);
+  const new_zone = structuredClone(zone);
   if (type in new_zone) {
     new_zone[type].push(rr);
   } else {
@@ -420,21 +489,7 @@ function create_record_generic(button, type, rr_dict) {
   }
   rebuild_zone(button, new_zone)
     .catch(error => {
-      html_error = `
-        <div class="row mt-1">
-        <div class="col">
-          <div class="alert alert-danger new-rr-update-msg" role="alert">
-            <h5 class="alert-heading">Error adding the record:</h5>
-            <p><pre>${error.type}</pre></p>
-            <hr>
-            <p class="mb-0"><pre>${error.message}</pre></p>
-          </div>
-        </div>
-        </div>
-        `;
-      div = document.createElement('div');
-      div.innerHTML = html_error;
-      button.parentElement.parentElement.insertAdjacentElement("afterend", div.firstElementChild);
+      show_rr_error(button.parentElement.parentElement, 'Error adding the record:', error);
     })
 }
 
@@ -464,8 +519,58 @@ function check_button(button) {
   }
 }
 
+function is_valid_dns_name(value, allow_at = true) {
+  if (!value) {
+    return false;
+  }
+  const trimmed = value.trim();
+  if (!trimmed || /\s/.test(trimmed)) {
+    return false;
+  }
+  if (trimmed === '@') {
+    return allow_at;
+  }
+  if (trimmed.includes('@') || trimmed === '.' || trimmed.startsWith('.') || trimmed.includes('..')) {
+    return false;
+  }
+  const ascii = safe_to_ascii(trimmed);
+  if (!ascii) {
+    return false;
+  }
+  const without_trailing_dot = ascii.endsWith('.') ? ascii.slice(0, -1) : ascii;
+  if (!without_trailing_dot || without_trailing_dot.length > 253) {
+    return false;
+  }
+  const labels = without_trailing_dot.split('.');
+  for (let i = 0; i < labels.length; i++) {
+    const label = labels[i];
+    if (!label || label.length > 63) {
+      return false;
+    }
+    if (i === 0 && label === '*') {
+      continue;
+    }
+    if (label.startsWith('-') || label.endsWith('-')) {
+      return false;
+    }
+    if (!/^[a-zA-Z0-9_-]+$/.test(label)) {
+      return false;
+    }
+  }
+  return true;
+}
+
 function validate_hostname(input) {
-  if (input.value && !input.value.includes(' ')) {
+  if (is_valid_dns_name(input.value, true)) {
+    input.classList.remove('is-invalid');
+  } else {
+    input.classList.add('is-invalid');
+  }
+  evaluate_form_button(input);
+}
+
+function validate_cname_hostname(input) {
+  if (is_valid_dns_name(input.value, false)) {
     input.classList.remove('is-invalid');
   } else {
     input.classList.add('is-invalid');
@@ -474,13 +579,24 @@ function validate_hostname(input) {
 }
 
 function validate_ttl(input) {
-  if (!input.value) {
+  if (input.validity && input.validity.badInput) {
+    input.classList.add('is-invalid');
+    evaluate_form_button(input);
+    return;
+  }
+  const raw = input.value.trim();
+  if (!raw) {
     input.classList.remove('is-invalid');
     evaluate_form_button(input);
     return;
   }
-  const number = parseInt(input.value);
-  if (isNaN(number) || number < 60) {
+  if (!/^\d+$/.test(raw)) {
+    input.classList.add('is-invalid');
+    evaluate_form_button(input);
+    return;
+  }
+  const number = Number(raw);
+  if (!Number.isInteger(number) || number < 60 || number > 2147483647) {
     input.classList.add('is-invalid');
   } else {
     input.classList.remove('is-invalid');
@@ -489,17 +605,17 @@ function validate_ttl(input) {
 }
 
 function validate_ipv4(ip) {
-  // From https://github.com/Karbashevskyi/thiis/blob/main/src/regexp.ts
-  const ipv4Regex = /^((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/;
+  // Reject leading zeros (e.g. 010.0.0.1) which BIND 9 named-checkzone rejects
+  const ipv4Regex = /^((25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\.){3}(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])$/;
   if (ipv4Regex.test(ip)) {
-    return ip.split('.').every(part => parseInt(part) <= 255);
+    return ip.split('.').every(part => parseInt(part, 10) <= 255);
   }
   return false;
 }
 
 function validate_ipv6(ip) {
-  // From https://github.com/Karbashevskyi/thiis/blob/main/src/regexp.ts
-  const ipv6Regex = /^((([0-9A-Fa-f]{1,4}:){7}([0-9A-Fa-f]{1,4}|:))|(([0-9A-Fa-f]{1,4}:){6}(:[0-9A-Fa-f]{1,4}|((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3})|:))|(([0-9A-Fa-f]{1,4}:){5}(((:[0-9A-Fa-f]{1,4}){1,2})|:((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3})|:))|(([0-9A-Fa-f]{1,4}:){4}(((:[0-9A-Fa-f]{1,4}){1,3})|((:[0-9A-Fa-f]{1,4})?:((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}))|:))|(([0-9A-Fa-f]{1,4}:){3}(((:[0-9A-Fa-f]{1,4}){1,4})|((:[0-9A-Fa-f]{1,4}){0,2}:((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}))|:))|(([0-9A-Fa-f]{1,4}:){2}(((:[0-9A-Fa-f]{1,4}){1,5})|((:[0-9A-Fa-f]{1,4}){0,3}:((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}))|:))|(([0-9A-Fa-f]{1,4}:){1}(((:[0-9A-Fa-f]{1,4}){1,6})|((:[0-9A-Fa-f]{1,4}){0,4}:((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}))|:))|(:(((:[0-9A-Fa-f]{1,4}){1,7})|((:[0-9A-Fa-f]{1,4}){0,5}:((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}))|:)))(%.+)?$/;
+  // From https://github.com/Karbashevskyi/thiis/blob/main/src/regexp.ts (without %zone_id suffix)
+  const ipv6Regex = /^((([0-9A-Fa-f]{1,4}:){7}([0-9A-Fa-f]{1,4}|:))|(([0-9A-Fa-f]{1,4}:){6}(:[0-9A-Fa-f]{1,4}|((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3})|:))|(([0-9A-Fa-f]{1,4}:){5}(((:[0-9A-Fa-f]{1,4}){1,2})|:((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3})|:))|(([0-9A-Fa-f]{1,4}:){4}(((:[0-9A-Fa-f]{1,4}){1,3})|((:[0-9A-Fa-f]{1,4})?:((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}))|:))|(([0-9A-Fa-f]{1,4}:){3}(((:[0-9A-Fa-f]{1,4}){1,4})|((:[0-9A-Fa-f]{1,4}){0,2}:((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}))|:))|(([0-9A-Fa-f]{1,4}:){2}(((:[0-9A-Fa-f]{1,4}){1,5})|((:[0-9A-Fa-f]{1,4}){0,3}:((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}))|:))|(([0-9A-Fa-f]{1,4}:){1}(((:[0-9A-Fa-f]{1,4}){1,6})|((:[0-9A-Fa-f]{1,4}){0,4}:((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}))|:))|(:(((:[0-9A-Fa-f]{1,4}){1,7})|((:[0-9A-Fa-f]{1,4}){0,5}:((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}))|:)))$/;
   if (ipv6Regex.test(ip)) {
     return ip.split(':').every(part => part.length <= 4);
   }
@@ -507,7 +623,7 @@ function validate_ipv6(ip) {
 }
 
 function validate_a(input) {
-  if (validate_ipv4(input.value)) {
+  if (validate_ipv4(input.value.trim())) {
     input.classList.remove('is-invalid');
   } else {
     input.classList.add('is-invalid');
@@ -516,7 +632,7 @@ function validate_a(input) {
 }
 
 function validate_aaaa(input) {
-  if (validate_ipv6(input.value)) {
+  if (validate_ipv6(input.value.trim())) {
     input.classList.remove('is-invalid');
   } else {
     input.classList.add('is-invalid');
@@ -525,7 +641,19 @@ function validate_aaaa(input) {
 }
 
 function validate_priority(input) {
-  if (input.value) {
+  if (input.validity && input.validity.badInput) {
+    input.classList.add('is-invalid');
+    evaluate_form_button(input);
+    return;
+  }
+  const raw = input.value.trim();
+  if (!/^\d+$/.test(raw)) {
+    input.classList.add('is-invalid');
+    evaluate_form_button(input);
+    return;
+  }
+  const number = Number(raw);
+  if (Number.isInteger(number) && number >= 0 && number <= 65535) {
     input.classList.remove('is-invalid');
   } else {
     input.classList.add('is-invalid');
@@ -534,7 +662,16 @@ function validate_priority(input) {
 }
 
 function validate_nameserver(input) {
-  if (input.value && !input.value.includes(' ') && !input.value.includes('@')) {
+  if (is_valid_dns_name(input.value, false)) {
+    input.classList.remove('is-invalid');
+  } else {
+    input.classList.add('is-invalid');
+  }
+  evaluate_form_button(input);
+}
+
+function validate_txt(input) {
+  if (input.value && input.value.trim().length > 0) {
     input.classList.remove('is-invalid');
   } else {
     input.classList.add('is-invalid');
@@ -544,11 +681,13 @@ function validate_nameserver(input) {
 
 const validation_functions = {
   'hostname-validation': validate_hostname,
+  'cname-hostname-validation': validate_cname_hostname,
   'a-validation': validate_a,
   'aaaa-validation': validate_aaaa,
   'ttl-validation': validate_ttl,
   'priority-validation': validate_priority,
   'nameserver-validation': validate_nameserver,
+  'txt-validation': validate_txt,
 }
 
 function validate_input(input) {
@@ -570,16 +709,26 @@ function set_input_validations() {
 
 function delete_rr(button) {
   const rr_type = button.closest('tr').querySelector('th').innerText.toLowerCase();
-  rrid = parseInt(button.attributes.rr_id.nodeValue);
+  const rrid = parseInt(button.attributes.rr_id.nodeValue, 10);
+  if (!(rr_type in zone)) {
+    return;
+  }
   const idx = zone[rr_type].findIndex(item => item.id == rrid);
   if (idx == -1) {
     return;
   }
-  new_zone = structuredClone(zone);
+  const new_zone = structuredClone(zone);
   new_zone[rr_type].splice(idx, 1);
-  rebuild_zone(button, new_zone).then(_ => {
-    // window.location.reload(true);
-  });
+  rebuild_zone(button, new_zone)
+    .then(_ => {
+      // window.location.reload(true);
+    })
+    .catch(error => {
+      const table = document.getElementById('zone-table');
+      if (table) {
+        show_rr_error(table, 'Error deleting the record:', error);
+      }
+    });
 }
 
 function domain_sanitizer(domain) {
@@ -656,8 +805,10 @@ function reset_zone() {
       // msg.classList.add('d-none');
     })
     .catch(error => {
-      msg = document.querySelector('#reset-error-msg').closest('div');
-      msg.innerHTML = '<p>Failed resetting the zone.</p>';
-      msg.classList.remove('d-none');
+      const err_span = document.querySelector('#reset-error-msg');
+      if (err_span) {
+        err_span.textContent = 'Failed resetting the zone.';
+        err_span.closest('div').classList.remove('d-none');
+      }
     });
 }

@@ -243,8 +243,8 @@
                 <div class="col-sm-6 col-lg-5">
                   <div class="mb-3">
                     <label for="cname-name" class="form-label">Hostname</label>
-                    <input type="text" class="form-control hostname-validation" id="cname-name" preview="true" value=""
-                      required="" placeholder="Enter @ or hostname">
+                    <input type="text" class="form-control cname-hostname-validation" id="cname-name" preview="true" value=""
+                      required="" placeholder="Enter hostname">
                     <small class="form-text"><span id="cname-name-preview">&nbsp;</span></small>
                   </div>
                 </div>
@@ -328,8 +328,11 @@
                 <div class="col">
                   <div class="mb-3">
                     <label for="txt-value" class="form-label">Value</label>
-                    <input type="text" class="form-control" id="txt-value" value="" required=""
+                    <input type="text" class="form-control txt-validation" id="txt-value" value="" required=""
                       placeholder="Paste TXT string here">
+                    <div class="invalid-feedback">
+                      Must not be empty.
+                    </div>
                   </div>
                 </div>
               </div>
