@@ -241,4 +241,45 @@ describe('Form Input Validations & SOA Serial Logic (main.js)', () => {
       assert.equal(inputs[0].classList.contains('is-invalid'), false, 'Non-empty TXT value must be valid');
     });
   });
+
+  describe('get_origin_subdomain_error()', () => {
+    it('accepts valid single-label DNS subdomains including IDN labels', () => {
+      for (const sub of ['myproject', 'zone-1', '123', 'a', 'españa', 'MyZone']) {
+        assert.equal(
+          main.get_origin_subdomain_error(sub, 'user.example.com.'),
+          null,
+          `Expected subdomain "${sub}" to be valid`
+        );
+      }
+    });
+
+    it('rejects empty, multi-label (dots), @, *, underscores, hyphens at ends, >63 chars, reserved "ns", and current origin', () => {
+      for (const bad of [
+        '',
+        '   ',
+        'my zone',
+        'sub.domain',
+        'myzone.',
+        '.myzone',
+        '@',
+        'user@zone',
+        '*',
+        '*.zone',
+        'my_zone',
+        '-leading',
+        'trailing-',
+        'a'.repeat(64),
+        'ns',
+        'NS',
+        'user',
+        'USER',
+      ]) {
+        assert.notEqual(
+          main.get_origin_subdomain_error(bad, 'user.example.com.'),
+          null,
+          `Expected subdomain "${bad}" to be rejected`
+        );
+      }
+    });
+  });
 });

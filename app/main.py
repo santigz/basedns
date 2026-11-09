@@ -1,3 +1,4 @@
+import json
 import logging
 
 from fastapi import FastAPI, Request, HTTPException, status, Security, Query
@@ -9,7 +10,13 @@ from fastapi.templating import Jinja2Templates
 from pydantic_settings import BaseSettings
 from typing import Optional
 
-from .dns_manager import ZoneManager, BadZoneFile, RecordUpdateError
+from .dns_manager import (
+    ZoneManager,
+    BadZoneFile,
+    RecordUpdateError,
+    InvalidSubdomainError,
+    SubdomainUnavailableError,
+)
 
 
 class Settings(BaseSettings):
@@ -52,10 +59,15 @@ async def read_root(request: Request):
                 "username": username,
               }
         return templates.TemplateResponse(request=request, name="html/index.html", context=ctx)
+    user_zone = zonemgr.get_user_zonefile(username)
+    user_origin = zonemgr.user_zone_origin(username)
+    user_subdomain = zonemgr.get_user_subdomain(username)
     ctx = {
             "username": username,
-            "user_origin": zonemgr.user_zone_origin(username),
-            "user_zone": zonemgr.get_user_zonefile(username),
+            "user_origin": user_origin,
+            "user_subdomain": user_subdomain,
+            "root_domain": zonemgr.origin,
+            "user_zone": user_zone,
             "testing_mode": settings.testing_mode,
             "user_token": zonemgr.get_user_token(username),
             "website_url": settings.website_url,
@@ -107,6 +119,108 @@ def reset_zone(request: Request):
         return zonemgr.reset_user_zonefile(username)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get('/origin/available')
+def check_origin_available(
+    request: Request,
+    subdomain: str = Query(..., description="Candidate subdomain label"),
+):
+    username = check_user(request)
+    try:
+        normalized = zonemgr.validate_subdomain(subdomain)
+    except InvalidSubdomainError as e:
+        return {
+            "available": False,
+            "valid": False,
+            "subdomain": None,
+            "origin": None,
+            "reason": str(e),
+        }
+    origin = f"{normalized}.{zonemgr.origin}"
+    current_sub = zonemgr.find_user_zones().get(username)
+    if current_sub is not None and current_sub.lower() == normalized:
+        return {
+            "available": False,
+            "valid": True,
+            "subdomain": normalized,
+            "origin": origin,
+            "reason": f'"{origin}" is already your current zone origin.',
+        }
+    if normalized in zonemgr.reserved_subdomains():
+        return {
+            "available": False,
+            "valid": True,
+            "subdomain": normalized,
+            "origin": origin,
+            "reason": f'Subdomain "{normalized}" is reserved and cannot be used.',
+        }
+    if not zonemgr.is_subdomain_available(normalized, exclude_user=username):
+        return {
+            "available": False,
+            "valid": True,
+            "subdomain": normalized,
+            "origin": origin,
+            "reason": f'Subdomain "{origin}" is already taken.',
+        }
+    return {
+        "available": True,
+        "valid": True,
+        "subdomain": normalized,
+        "origin": origin,
+        "reason": None,
+    }
+
+
+@app.post('/origin')
+async def change_origin(request: Request):
+    username = check_user(request)
+    raw_body = await request.body()
+    body_str = raw_body.decode("utf-8").strip()
+    new_subdomain = ""
+    try:
+        payload = json.loads(body_str) if body_str.startswith("{") else None
+    except json.JSONDecodeError:
+        payload = None
+
+    if isinstance(payload, dict):
+        if not payload.get("acknowledge", False):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "error": "Acknowledgement required",
+                    "message": "You must acknowledge that your existing zone file will be destroyed.",
+                },
+            )
+        new_subdomain = str(payload.get("subdomain") or payload.get("origin") or "")
+    else:
+        new_subdomain = body_str
+
+    try:
+        zone = zonemgr.change_user_origin(username, new_subdomain)
+        updated_subdomain = zonemgr.get_user_subdomain(username)
+        return {
+            "status": "updated",
+            "subdomain": updated_subdomain,
+            "origin": zonemgr.user_zone_origin(username),
+            "zone": zone,
+        }
+    except InvalidSubdomainError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"error": "Invalid origin", "message": str(e)},
+        )
+    except SubdomainUnavailableError as e:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"error": "Origin unavailable", "message": str(e)},
+        )
+    except Exception as e:
+        logger.error(f"Exception changing origin for {username}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"error": "Internal error", "message": str(e)},
+        )
 
 
 def get_api_key(

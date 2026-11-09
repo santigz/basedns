@@ -3,10 +3,19 @@ zone "{{origin}}" {
   file "/etc/bind/main-zone";
 };
 
+{% if user_zones is defined %}
+{% for uz in user_zones %}
+zone "{{uz.subdomain}}.{{origin}}" {
+  type master;
+  file "/etc/bind/user-zones/{{uz.filename}}";
+};
+{% endfor %}
+{% else %}
 {% for user in user_list %}
 zone "{{user}}.{{origin}}" {
   type master;
   file "/etc/bind/user-zones/{{user}}";
 };
 {% endfor %}
+{% endif %}
 

@@ -6,7 +6,7 @@
   opacity: 0;
   margin-left: 8px;
   cursor: pointer;
-  font-size: 0.75rem;
+  font-size: 0.8rem;
   transition: opacity 0.15s ease-in-out;
   user-select: none;
 }
@@ -23,14 +23,14 @@
   }
 }
 
-.soa-summary-bar {
-  font-size: 0.85rem;
+.row-action-btn {
+  padding: 0.15rem 0.45rem;
+  font-size: 0.82rem;
+  text-decoration: none;
 }
 
-.soa-summary-item {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
+.row-action-btn:hover {
+  background-color: var(--bs-tertiary-bg);
 }
 
 tr.editing-record-row {

@@ -235,4 +235,78 @@ describe('UI Record Creation, Deletion Protection, XSS & Error Handling (main.js
     await new Promise(r => setImmediate(r));
     assert.equal(main.get_zone().caa[0].value, 'letsencrypt.org');
   });
+
+  it('requires both a valid new subdomain and acknowledgement checkbox before enabling change_origin() submission', async () => {
+    const { inputs } = dom.createForm([{ id: 'new-origin-input', value: '' }]);
+    const originInput = inputs[0];
+    const suffixEl = { id: 'new-origin-root-suffix', textContent: '.' };
+    const ackInput = dom.createInput({ id: 'change-origin-ack', value: '' });
+    ackInput.checked = false;
+    const submitBtn = { id: 'change-origin-submit', disabled: true };
+    const errorFooter = { classList: dom.makeClassList(['modal-footer', 'd-none']) };
+    const errorSpan = {
+      id: 'change-origin-error-msg',
+      textContent: '',
+      closest: (sel) => (sel === 'div' ? errorFooter : null),
+    };
+
+    dom.elementsById.set('new-origin-input', originInput);
+    dom.elementsById.set('new-origin-root-suffix', suffixEl);
+    dom.elementsById.set('change-origin-ack', ackInput);
+    dom.elementsById.set('change-origin-submit', submitBtn);
+    dom.queryMap.set('#change-origin-error-msg', errorSpan);
+
+    main.set_change_origin_listeners();
+    assert.equal(suffixEl.textContent, '.example.com.');
+
+    // 1. Valid input but checkbox unchecked -> submit button remains disabled
+    originInput.value = 'españa';
+    originInput.trigger('input');
+    assert.equal(submitBtn.disabled, true, 'Submit button must remain disabled until acknowledgement is checked');
+
+    // 2. Check acknowledgement -> submit button enabled
+    ackInput.checked = true;
+    ackInput.trigger('change');
+    assert.equal(submitBtn.disabled, false, 'Submit button must be enabled when input is valid and checkbox is checked');
+
+    // 3. Invalid input (current origin) -> submit button disabled again
+    originInput.value = 'user';
+    originInput.trigger('input');
+    assert.equal(submitBtn.disabled, true, 'Submit button must be disabled when new origin equals current origin');
+
+    // 4. Submit valid new origin -> sends POST /origin with Punycode subdomain and acknowledge: true
+    originInput.value = 'MyZone';
+    originInput.trigger('input');
+    assert.equal(submitBtn.disabled, false);
+
+    let capturedReq = null;
+    let reloaded = false;
+    dom.window.location.reload = () => { reloaded = true; };
+    globalThis.fetch = async (url, opts) => {
+      capturedReq = { url, opts };
+      return { ok: true, json: async () => ({ status: 'updated' }) };
+    };
+
+    await main.change_origin();
+    assert.equal(capturedReq.url, '/origin');
+    assert.equal(capturedReq.opts.method, 'POST');
+    assert.deepEqual(JSON.parse(capturedReq.opts.body), {
+      subdomain: 'myzone',
+      acknowledge: true,
+    });
+    assert.equal(reloaded, true);
+
+    // 5. Server conflict error (409) -> displays error message in modal footer
+    globalThis.fetch = async () => ({
+      ok: false,
+      status: 409,
+      json: async () => ({
+        detail: { error: 'Origin unavailable', message: 'Subdomain "myzone.example.com." is already taken.' },
+      }),
+    });
+
+    await main.change_origin();
+    assert.equal(errorFooter.classList.contains('d-none'), false);
+    assert.match(errorSpan.textContent, /already taken/);
+  });
 });

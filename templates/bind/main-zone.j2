@@ -1,7 +1,7 @@
 $ORIGIN {{origin}}
 $TTL 60
 
-@  IN  SOA ns.{{origin}} admin.{{origin}} 1 60 60 60 60
+@  IN  SOA ns.{{origin}} admin.{{origin}} {{serial | default(1)}} 60 60 60 60
 @  IN  NS  ns
 ns IN  A   {{ns_ip}}
 

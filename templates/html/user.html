@@ -16,123 +16,98 @@
   <link href="/static/css/style.css" rel="stylesheet">
 </head>
 
-<body class="bg-light-subtle">
+<body>
   {% if testing_mode -%}
   <div class="container-fluid text-bg-danger text-center fw-bold py-1">LOCAL TEST MODE</div>
   {% endif -%}
   <div class="container-lg pb-5">
 
-    <!-- Header -->
-    <div class="row justify-content-between align-items-center mt-3 mb-3 pb-2 border-bottom">
+    <!-- Header with integrated workspace switcher -->
+    <div class="row justify-content-between align-items-center mt-3 mb-4">
       <div class="col">
-        <h1 class="text-break mb-0 font-monospace fs-2">{{user_origin}}</h1>
+        <h1 class="text-break mb-0">{{user_origin}}</h1>
       </div>
-      <div class="col-auto d-flex align-items-center justify-content-end gap-2">
-        <button type="button" class="btn btn-outline-secondary text-nowrap" onclick="logout()">
-          <i class="bi bi-box-arrow-right me-1"></i>Log out
-        </button>
+      <div class="col-auto d-flex align-items-center justify-content-end gap-4">
+        <ul class="nav nav-underline" id="workspaceTabs" role="tablist">
+          <li class="nav-item" role="presentation">
+            <button class="nav-link active" id="zone-workspace-tab" data-bs-toggle="tab"
+              data-bs-target="#zone-workspace" type="button" role="tab" aria-controls="zone-workspace"
+              aria-selected="true">DNS Zone</button>
+          </li>
+          <li class="nav-item" role="presentation">
+            <button class="nav-link" id="dyndns-tab" data-bs-toggle="tab"
+              data-bs-target="#dyndns" type="button" role="tab" aria-controls="dyndns"
+              aria-selected="false" tabindex="-1">DynDNS</button>
+          </li>
+        </ul>
+        <button type="button" class="btn btn-light text-nowrap" onclick="logout()">Log out</button>
       </div>
     </div>
-
-    <!-- Top-Level Workspace Navigation (DNS Zone vs Dynamic DNS) -->
-    <ul class="nav nav-pills mb-4" id="workspaceTabs" role="tablist">
-      <li class="nav-item" role="presentation">
-        <button class="nav-link active" id="zone-workspace-tab" data-bs-toggle="pill"
-          data-bs-target="#zone-workspace" type="button" role="tab" aria-controls="zone-workspace"
-          aria-selected="true">
-          <i class="bi bi-diagram-3 me-1"></i>DNS Zone
-        </button>
-      </li>
-      <li class="nav-item" role="presentation">
-        <button class="nav-link" id="dyndns-tab" data-bs-toggle="pill"
-          data-bs-target="#dyndns" type="button" role="tab" aria-controls="dyndns"
-          aria-selected="false" tabindex="-1">
-          <i class="bi bi-arrow-repeat me-1"></i>Dynamic DNS (DynDNS)
-        </button>
-      </li>
-    </ul>
 
     <div class="tab-content" id="workspaceTabContent">
 
       <!-- WORKSPACE 1: DNS ZONE MANAGEMENT -->
       <div class="tab-pane fade show active" id="zone-workspace" role="tabpanel" aria-labelledby="zone-workspace-tab">
 
-        <!-- Zone Records Panel (Table & File Views + Reset Zone Action) -->
-        <div id="zone-panel" class="card shadow-sm mb-4">
-          <div class="card-header bg-white d-flex flex-wrap justify-content-between align-items-center gap-2 pt-2 pb-0">
-            <div class="d-flex align-items-center gap-3">
-              <h5 class="card-title mb-2">DNS zone</h5>
-              <ul class="nav nav-underline" id="zoneViewTabs" role="tablist">
-                <li class="nav-item" role="presentation">
-                  <button class="nav-link active" id="table-tab" data-bs-toggle="tab"
-                    data-bs-target="#table-view" type="button" role="tab" aria-controls="table-view"
-                    aria-selected="true">
-                    <i class="bi bi-table me-1"></i>Table
-                  </button>
-                </li>
-                <li class="nav-item" role="presentation">
-                  <button class="nav-link" id="file-tab" data-bs-toggle="tab"
-                    data-bs-target="#file-view" type="button" role="tab" aria-controls="file-view"
-                    aria-selected="false" tabindex="-1">
-                    <i class="bi bi-file-earmark-code me-1"></i>File
-                  </button>
-                </li>
-              </ul>
-            </div>
-            <div class="mb-2">
-              <button type="button" class="btn btn-sm btn-outline-danger" data-bs-toggle="modal"
+        <!-- Zone Records Section -->
+        <div id="zone-panel" class="mb-5">
+          <h5 class="mb-2">DNS zone</h5>
+          <ul class="nav nav-underline align-items-center" id="zoneViewTabs" role="tablist">
+            <li class="nav-item" role="presentation">
+              <button class="nav-link active" id="table-tab" data-bs-toggle="tab"
+                data-bs-target="#table-view" type="button" role="tab" aria-controls="table-view"
+                aria-selected="true">Table</button>
+            </li>
+            <li class="nav-item" role="presentation">
+              <button class="nav-link" id="file-tab" data-bs-toggle="tab"
+                data-bs-target="#file-view" type="button" role="tab" aria-controls="file-view"
+                aria-selected="false" tabindex="-1">File</button>
+            </li>
+            <li class="nav-item ms-auto d-flex align-items-center gap-2" role="presentation">
+              <button type="button" class="btn btn-sm btn-link text-danger text-decoration-none" data-bs-toggle="modal"
+                data-bs-target="#changeOriginModal">
+                <i class="bi bi-globe2 me-1"></i>Change origin
+              </button>
+              <button type="button" class="btn btn-sm btn-link text-danger text-decoration-none" data-bs-toggle="modal"
                 data-bs-target="#staticBackdrop">
                 <i class="bi bi-arrow-counterclockwise me-1"></i>Reset zone
               </button>
+            </li>
+          </ul>
+
+          <div class="tab-content mt-2">
+            <div class="tab-pane table-responsive fade active show" id="table-view" role="tabpanel"
+              aria-labelledby="table-tab">
+              <div class="d-flex flex-wrap align-items-center gap-2 py-2 text-body-secondary small" id="soa-summary-bar">
+                <span>$ORIGIN: <code id="soa-origin">{{user_origin}}</code></span>
+                <span class="text-body-tertiary">|</span>
+                <span>$TTL: <code id="soa-default-ttl">60s</code></span>
+              </div>
+              <table class="table align-middle" id="zone-table">
+                <thead>
+                  <tr>
+                    <th scope="col" style="width: 80px;">Type</th>
+                    <th scope="col">Hostname</th>
+                    <th scope="col" style="min-width: 150px;">Value</th>
+                    <th scope="col" style="min-width: 110px;">TTL (seconds)</th>
+                    <th scope="col" class="text-end" style="min-width: 140px;">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                </tbody>
+              </table>
             </div>
-          </div>
 
-          <div class="card-body">
-            <div class="tab-content">
-              <div class="tab-pane table-responsive fade active show" id="table-view" role="tabpanel"
-                aria-labelledby="table-tab">
-                <div class="d-flex flex-wrap align-items-center gap-3 px-3 py-2 mb-2 bg-body-tertiary border rounded soa-summary-bar" id="soa-summary-bar">
-                  <span class="soa-summary-item" title="Zone Origin ($ORIGIN)">
-                    <span class="text-body-secondary fw-semibold">$ORIGIN:</span>
-                    <code id="soa-origin">{{user_origin}}</code>
-                  </span>
-                  <span class="text-body-tertiary">|</span>
-                  <span class="soa-summary-item" title="Default Record Time-To-Live ($TTL)">
-                    <span class="text-body-secondary fw-semibold">$TTL:</span>
-                    <code id="soa-default-ttl">60s</code>
-                  </span>
-                </div>
-                <table class="table table-hover align-middle mb-0" id="zone-table">
-                  <thead class="table-light">
-                    <tr>
-                      <th scope="col" style="width: 90px;">Type</th>
-                      <th scope="col">Hostname</th>
-                      <th scope="col" style="min-width: 160px;">Value</th>
-                      <th scope="col" style="min-width: 110px;">TTL (seconds)</th>
-                      <th scope="col" class="text-end" style="min-width: 170px;">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                  </tbody>
-                </table>
+            <div class="tab-pane fade" id="file-view" role="tabpanel" aria-labelledby="file-tab">
+              <div class="d-flex justify-content-end align-items-center gap-2 mb-2">
+                <button type="button" class="btn btn-sm btn-link text-secondary text-decoration-none" onclick="copy_zonefile(this)">
+                  <i class="bi bi-clipboard me-1"></i><span>Copy</span>
+                </button>
+                <button type="button" class="btn btn-sm btn-link text-secondary text-decoration-none" onclick="download_zonefile()">
+                  <i class="bi bi-download me-1"></i>Download
+                </button>
               </div>
-
-              <div class="tab-pane fade" id="file-view" role="tabpanel" aria-labelledby="file-tab">
-                <div class="d-flex justify-content-between align-items-center mb-2">
-                  <small class="text-body-secondary">
-                    Read-only BIND 9 zone file representation (validated via <code>named-checkzone</code>).
-                  </small>
-                  <div class="btn-group btn-group-sm" role="group" aria-label="Zone file actions">
-                    <button type="button" class="btn btn-outline-secondary" onclick="copy_zonefile(this)">
-                      <i class="bi bi-clipboard me-1"></i><span>Copy zone file</span>
-                    </button>
-                    <button type="button" class="btn btn-outline-secondary" onclick="download_zonefile()">
-                      <i class="bi bi-download me-1"></i>Download
-                    </button>
-                  </div>
-                </div>
-                <pre class="bg-body-tertiary border rounded p-3 mb-0"><code id="zone-file">{{user_zone}}</code></pre>
-              </div>
+              <pre class="bg-body-tertiary rounded-2 p-3 mb-0"><code id="zone-file">{{user_zone}}</code></pre>
             </div>
           </div>
         </div>
@@ -143,21 +118,13 @@
           <div class="modal-dialog modal-dialog-centered">
             <div class="modal-content">
               <div class="modal-header">
-                <h1 class="modal-title fs-5" id="staticBackdropLabel">
-                  <i class="bi bi-exclamation-triangle-fill text-danger me-1"></i>Reset DNS zone
-                </h1>
+                <h1 class="modal-title fs-5" id="staticBackdropLabel">Reset zone</h1>
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
               </div>
               <div class="modal-body">
-                <p class="mb-2">
-                  Resetting the zone will permanently delete all custom records and restore the default zone template for <code>{{user_origin}}</code>:
-                </p>
-                <ul class="small text-body-secondary mb-3">
-                  <li>Default <code>SOA</code> record and <code>$TTL 60</code></li>
-                  <li>Default apex <code>@ IN NS ns</code> and glue <code>ns IN A</code> records</li>
-                </ul>
+                <p>Resetting the zone will delete all custom records and start a fresh DNS zone for <code>{{user_origin}}</code>.</p>
                 <div class="d-flex justify-content-end gap-2">
-                  <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                  <button type="button" class="btn btn-light" data-bs-dismiss="modal">Cancel</button>
                   <button type="button" class="btn btn-danger" onclick="reset_zone()">
                     Yes, delete everything and start again
                   </button>
@@ -169,474 +136,514 @@
           </div>
         </div>
 
-        <!-- Create / Edit Record Panel (co-located inside DNS Zone Workspace) -->
-        <div id="new-record-panel" class="card shadow-sm mb-4">
-          <div class="card-header bg-white d-flex justify-content-between align-items-center pt-3 pb-0">
-            <div>
-              <h5 class="card-title mb-2" id="record-form-title">Create new record</h5>
-              <ul class="nav nav-underline" id="recordTabs" role="tablist">
-                <li class="nav-item" role="presentation"><button class="nav-link active" id="a-tab" data-bs-toggle="tab"
-                    data-bs-target="#a-record" type="button" role="tab" aria-selected="true">A</button></li>
-                <li class="nav-item" role="presentation"><button class="nav-link" id="aaaa-tab" data-bs-toggle="tab"
-                    data-bs-target="#aaaa-record" type="button" role="tab" aria-selected="false" tabindex="-1">AAAA</button>
-                </li>
-                <li class="nav-item" role="presentation"><button class="nav-link" id="cname-tab" data-bs-toggle="tab"
-                    data-bs-target="#cname-record" type="button" role="tab" aria-selected="false" tabindex="-1">CNAME</button>
-                </li>
-                <li class="nav-item" role="presentation"><button class="nav-link" id="mx-tab" data-bs-toggle="tab"
-                    data-bs-target="#mx-record" type="button" role="tab" aria-selected="false" tabindex="-1">MX</button></li>
-                <li class="nav-item" role="presentation"><button class="nav-link" id="txt-tab" data-bs-toggle="tab"
-                    data-bs-target="#txt-record" type="button" role="tab" aria-selected="false" tabindex="-1">TXT</button>
-                </li>
-                <li class="nav-item" role="presentation"><button class="nav-link" id="ns-tab" data-bs-toggle="tab"
-                    data-bs-target="#ns-record" type="button" role="tab" aria-selected="false" tabindex="-1">NS</button></li>
-                <li class="nav-item" role="presentation"><button class="nav-link" id="srv-tab" data-bs-toggle="tab"
-                    data-bs-target="#srv-record" type="button" role="tab" aria-selected="false" tabindex="-1">SRV</button>
-                </li>
-                <li class="nav-item" role="presentation"><button class="nav-link" id="caa-tab" data-bs-toggle="tab"
-                    data-bs-target="#caa-record" type="button" role="tab" aria-selected="false" tabindex="-1">CAA</button>
-                </li>
-              </ul>
+        <!-- Change Origin Confirmation Modal -->
+        <div class="modal fade" id="changeOriginModal" tabindex="-1"
+          aria-labelledby="changeOriginModalLabel" aria-hidden="true">
+          <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+              <div class="modal-header">
+                <h1 class="modal-title fs-5" id="changeOriginModalLabel">Change zone origin</h1>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+              </div>
+              <div class="modal-body">
+                <div class="alert alert-warning mb-3" role="alert">
+                  Changing your origin will <strong>permanently destroy</strong> your current DNS zone (<code>{{user_origin}}</code>) and all its records, replacing it with a fresh initial zone.
+                </div>
+                <form id="change-origin-form" class="needs-validation" novalidate autocomplete="off"
+                  onsubmit="event.preventDefault(); change_origin();">
+                  <div class="mb-3">
+                    <label for="new-origin-input" class="form-label">New zone origin</label>
+                    <div class="input-group has-validation">
+                      <input type="text" class="form-control font-monospace" id="new-origin-input"
+                        placeholder="Enter new subdomain (e.g. myproject)" required>
+                      <span class="input-group-text font-monospace" id="new-origin-root-suffix">.{{ user_origin.split('.', 1)[1] if '.' in user_origin else root_domain }}</span>
+                      <div class="invalid-feedback" id="new-origin-feedback">
+                        Must be a valid single-label DNS subdomain.
+                      </div>
+                    </div>
+                  </div>
+                  <div class="form-check mb-3">
+                    <input class="form-check-input" type="checkbox" id="change-origin-ack">
+                    <label class="form-check-label" for="change-origin-ack">
+                      I understand that my current zone (<code>{{user_origin}}</code>) and all its records will be destroyed and reset.
+                    </label>
+                  </div>
+                  <div class="d-flex justify-content-end gap-2">
+                    <button type="button" class="btn btn-light" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-danger" id="change-origin-submit" disabled
+                      onclick="change_origin()">
+                      Destroy current zone and change origin
+                    </button>
+                  </div>
+                </form>
+              </div>
+              <div class="modal-footer bg-danger-subtle d-none" id="change-origin-error-footer">Error changing the zone origin.<br><span
+                  id="change-origin-error-msg"></span></div>
             </div>
-            <button type="button" class="btn btn-sm btn-outline-secondary d-none mb-2" id="cancel-edit-btn"
+          </div>
+        </div>
+
+        <!-- Create / Edit Record Section -->
+        <div id="new-record-panel" class="mb-4">
+          <div class="d-flex justify-content-between align-items-center">
+            <h5 class="mb-2" id="record-form-title">Create new record</h5>
+            <button type="button" class="btn btn-sm btn-link text-secondary text-decoration-none d-none" id="cancel-edit-btn"
               onclick="cancel_edit_rr()">
               <i class="bi bi-x-lg me-1"></i>Cancel edit
             </button>
           </div>
+          <ul class="nav nav-underline" id="recordTabs" role="tablist">
+            <li class="nav-item" role="presentation"><button class="nav-link active" id="a-tab" data-bs-toggle="tab"
+                data-bs-target="#a-record" type="button" role="tab" aria-selected="true">A</button></li>
+            <li class="nav-item" role="presentation"><button class="nav-link" id="aaaa-tab" data-bs-toggle="tab"
+                data-bs-target="#aaaa-record" type="button" role="tab" aria-selected="false" tabindex="-1">AAAA</button>
+            </li>
+            <li class="nav-item" role="presentation"><button class="nav-link" id="cname-tab" data-bs-toggle="tab"
+                data-bs-target="#cname-record" type="button" role="tab" aria-selected="false" tabindex="-1">CNAME</button>
+            </li>
+            <li class="nav-item" role="presentation"><button class="nav-link" id="mx-tab" data-bs-toggle="tab"
+                data-bs-target="#mx-record" type="button" role="tab" aria-selected="false" tabindex="-1">MX</button></li>
+            <li class="nav-item" role="presentation"><button class="nav-link" id="txt-tab" data-bs-toggle="tab"
+                data-bs-target="#txt-record" type="button" role="tab" aria-selected="false" tabindex="-1">TXT</button>
+            </li>
+            <li class="nav-item" role="presentation"><button class="nav-link" id="ns-tab" data-bs-toggle="tab"
+                data-bs-target="#ns-record" type="button" role="tab" aria-selected="false" tabindex="-1">NS</button></li>
+            <li class="nav-item" role="presentation"><button class="nav-link" id="srv-tab" data-bs-toggle="tab"
+                data-bs-target="#srv-record" type="button" role="tab" aria-selected="false" tabindex="-1">SRV</button>
+            </li>
+            <li class="nav-item" role="presentation"><button class="nav-link" id="caa-tab" data-bs-toggle="tab"
+                data-bs-target="#caa-record" type="button" role="tab" aria-selected="false" tabindex="-1">CAA</button>
+            </li>
+          </ul>
 
-          <div class="card-body">
-            <div class="tab-content" id="new-record-tab">
+          <div class="tab-content mt-3" id="new-record-tab">
 
-              <!-- A RECORD -->
-              <div class="tab-pane fade active show" id="a-record" role="tabpanel" aria-labelledby="a-tab">
-                <form id="a-record-form" class="needs-validation" novalidate autocomplete="off"
-                  onsubmit="event.preventDefault(); create_record_a(document.getElementById('a-button'));">
-                  <div class="container-fluid px-0">
-                    <div class="row align-items-start">
-                      <div class="col-sm-6 col-lg-5">
-                        <div class="mb-3">
-                          <label for="a-name" class="form-label">Hostname</label>
-                          <input type="text" class="form-control hostname-validation" id="a-name" preview="true" value=""
-                            required placeholder="Enter @ or relative hostname (e.g. www)">
-                          <div class="invalid-feedback">
-                            Must be a valid DNS hostname (use <code>@</code> for the zone apex).
-                          </div>
-                          <small class="form-text text-body-secondary">FQDN: <span id="a-name-preview" class="font-monospace">&nbsp;</span></small>
+            <!-- A RECORD -->
+            <div class="tab-pane fade active show" id="a-record" role="tabpanel" aria-labelledby="a-tab">
+              <form id="a-record-form" class="needs-validation" novalidate autocomplete="off"
+                onsubmit="event.preventDefault(); create_record_a(document.getElementById('a-button'));">
+                <div class="container-fluid px-0">
+                  <div class="row align-items-start">
+                    <div class="col-sm-6 col-lg-5">
+                      <div class="mb-3">
+                        <label for="a-name" class="form-label">Hostname</label>
+                        <input type="text" class="form-control hostname-validation" id="a-name" preview="true" value=""
+                          required placeholder="Enter @ or relative hostname (e.g. www)">
+                        <div class="invalid-feedback">
+                          Must be a valid DNS hostname (use <code>@</code> for the zone apex).
                         </div>
+                        <small class="form-text text-body-secondary"><span id="a-name-preview" class="font-monospace">&nbsp;</span></small>
                       </div>
-                      <div class="col-sm-6 col-lg-4">
-                        <div class="mb-3">
-                          <label for="a-ip" class="form-label">IPv4 Address</label>
-                          <input type="text" class="form-control a-validation" id="a-ip" value="" required
-                            placeholder="e.g. 192.0.2.1">
-                          <div class="invalid-feedback">
-                            Must be a valid IPv4 address (without leading zeros).
-                          </div>
-                        </div>
-                      </div>
-                      <div class="col-sm-6 col-md-4 col-lg-3">
-                        <div class="mb-3">
-                          <label for="a-ttl" class="form-label">TTL (seconds)</label>
-                          <input type="number" class="form-control ttl-validation" id="a-ttl" placeholder="(default)"
-                            min="60">
-                          <div class="invalid-feedback">Must be an integer of at least 60.</div>
+                    </div>
+                    <div class="col-sm-6 col-lg-3">
+                      <div class="mb-3">
+                        <label for="a-ip" class="form-label">IPv4 Address</label>
+                        <input type="text" class="form-control a-validation" id="a-ip" value="" required
+                          placeholder="e.g. 192.0.2.1">
+                        <div class="invalid-feedback">
+                          Must be a valid IPv4 address (without leading zeros).
                         </div>
                       </div>
                     </div>
-                    <div class="row">
-                      <div class="col">
-                        <button type="button" class="btn btn-success" id="a-button" onclick="create_record_a(this)">Create
-                          Record</button>
+                    <div class="col-sm-6 col-md-4 col-lg-2">
+                      <div class="mb-3">
+                        <label for="a-ttl" class="form-label">TTL</label>
+                        <input type="number" class="form-control ttl-validation" id="a-ttl" placeholder="(default)"
+                          min="60">
+                        <div class="invalid-feedback">Must be an integer of at least 60.</div>
                       </div>
                     </div>
                   </div>
-                </form>
-              </div>
-
-              <!-- AAAA RECORD -->
-              <div class="tab-pane fade" id="aaaa-record" role="tabpanel" aria-labelledby="aaaa-tab">
-                <form id="aaaa-record-form" class="needs-validation" novalidate autocomplete="off"
-                  onsubmit="event.preventDefault(); create_record_aaaa(document.getElementById('aaaa-button'));">
-                  <div class="container-fluid px-0">
-                    <div class="row align-items-start">
-                      <div class="col-sm-6 col-lg-5">
-                        <div class="mb-3">
-                          <label for="aaaa-name" class="form-label">Hostname</label>
-                          <input type="text" class="form-control hostname-validation" id="aaaa-name" preview="true" value=""
-                            required placeholder="Enter @ or relative hostname (e.g. ipv6)">
-                          <div class="invalid-feedback">
-                            Must be a valid DNS hostname (use <code>@</code> for the zone apex).
-                          </div>
-                          <small class="form-text text-body-secondary">FQDN: <span id="aaaa-name-preview" class="font-monospace">&nbsp;</span></small>
-                        </div>
-                      </div>
-                      <div class="col-sm-6 col-lg-4">
-                        <div class="mb-3">
-                          <label for="aaaa-ip" class="form-label">IPv6 Address</label>
-                          <input type="text" class="form-control aaaa-validation" id="aaaa-ip" value="" required
-                            placeholder="e.g. 2001:db8::1">
-                          <div class="invalid-feedback">
-                            Must be a valid IPv6 address (without %zone index).
-                          </div>
-                        </div>
-                      </div>
-                      <div class="col-sm-6 col-md-4 col-lg-3">
-                        <div class="mb-3">
-                          <label for="aaaa-ttl" class="form-label">TTL (seconds)</label>
-                          <input type="number" class="form-control ttl-validation" id="aaaa-ttl" placeholder="(default)"
-                            min="60">
-                          <div class="invalid-feedback">Must be an integer of at least 60.</div>
-                        </div>
-                      </div>
-                    </div>
-                    <div class="row">
-                      <div class="col">
-                        <button type="button" class="btn btn-success" id="aaaa-button"
-                          onclick="create_record_aaaa(this)">Create Record</button>
-                      </div>
+                  <div class="row">
+                    <div class="col">
+                      <button type="button" class="btn btn-success" id="a-button" onclick="create_record_a(this)">Create
+                        Record</button>
                     </div>
                   </div>
-                </form>
-              </div>
-
-              <!-- CNAME RECORD -->
-              <div class="tab-pane fade" id="cname-record" role="tabpanel" aria-labelledby="cname-tab">
-                <form id="cname-record-form" class="needs-validation" novalidate autocomplete="off"
-                  onsubmit="event.preventDefault(); create_record_cname(document.getElementById('cname-button'));">
-                  <div class="container-fluid px-0">
-                    <div class="row align-items-start">
-                      <div class="col-sm-6 col-lg-5">
-                        <div class="mb-3">
-                          <label for="cname-name" class="form-label">Alias Hostname (Owner)</label>
-                          <input type="text" class="form-control cname-hostname-validation" id="cname-name" preview="true" value=""
-                            required placeholder="Enter subdomain (e.g. blog, www)">
-                          <div class="invalid-feedback">
-                            Must be a valid subdomain hostname. <code>@</code> is not allowed for CNAME records (conflicts with SOA/NS at zone apex).
-                          </div>
-                          <small class="form-text text-body-secondary">FQDN: <span id="cname-name-preview" class="font-monospace">&nbsp;</span></small>
-                        </div>
-                      </div>
-                      <div class="col-sm-6 col-lg-4">
-                        <div class="mb-3">
-                          <label for="cname-alias" class="form-label">Target (Canonical Name)</label>
-                          <input type="text" class="form-control hostname-validation" id="cname-alias" preview="true" value=""
-                            required placeholder="e.g. @, web, or host.example.com.">
-                          <div class="invalid-feedback">
-                            Must be a valid target hostname or <code>@</code>.
-                          </div>
-                          <small class="form-text text-body-secondary d-block">Target FQDN: <span id="cname-alias-preview" class="font-monospace">&nbsp;</span></small>
-                          <small class="form-text text-body-secondary">End external domains with a trailing dot (<code>.</code>) so <code>.{{user_origin}}</code> is not appended.</small>
-                        </div>
-                      </div>
-                      <div class="col-sm-6 col-md-4 col-lg-3">
-                        <div class="mb-3">
-                          <label for="cname-ttl" class="form-label">TTL (seconds)</label>
-                          <input type="number" class="form-control ttl-validation" id="cname-ttl" placeholder="(default)"
-                            min="60">
-                          <div class="invalid-feedback">Must be an integer of at least 60.</div>
-                        </div>
-                      </div>
-                    </div>
-                    <div class="row">
-                      <div class="col">
-                        <button type="button" class="btn btn-success" id="cname-button"
-                          onclick="create_record_cname(this)">Create Record</button>
-                      </div>
-                    </div>
-                  </div>
-                </form>
-              </div>
-
-              <!-- MX RECORD -->
-              <div class="tab-pane fade" id="mx-record" role="tabpanel" aria-labelledby="mx-tab">
-                <form id="mx-record-form" class="needs-validation" novalidate autocomplete="off"
-                  onsubmit="event.preventDefault(); create_record_mx(document.getElementById('mx-button'));">
-                  <div class="container-fluid px-0">
-                    <div class="row align-items-start">
-                      <div class="col-sm-6 col-lg-4">
-                        <div class="mb-3">
-                          <label for="mx-name" class="form-label">Hostname</label>
-                          <input type="text" class="form-control hostname-validation" id="mx-name" preview="true" value=""
-                            required placeholder="Enter @ or subdomain">
-                          <div class="invalid-feedback">
-                            Must be a valid DNS hostname (use <code>@</code> for the zone apex).
-                          </div>
-                          <small class="form-text text-body-secondary">FQDN: <span id="mx-name-preview" class="font-monospace">&nbsp;</span></small>
-                        </div>
-                      </div>
-                      <div class="col-sm-6 col-lg-4">
-                        <div class="mb-3">
-                          <label for="mx-host" class="form-label">Mail server hostname</label>
-                          <input type="text" class="form-control hostname-validation" id="mx-host" preview="true" value=""
-                            required placeholder="e.g. mail or mail.example.com.">
-                          <div class="invalid-feedback">
-                            Must be a valid mail server hostname.
-                          </div>
-                          <small class="form-text text-body-secondary d-block">Server FQDN: <span id="mx-host-preview" class="font-monospace">&nbsp;</span></small>
-                          <small class="form-text text-body-secondary">End external domains with a dot (<code>.</code>).</small>
-                        </div>
-                      </div>
-                      <div class="col-6 col-md-3 col-lg-2">
-                        <div class="mb-3">
-                          <label for="mx-priority" class="form-label">Priority</label>
-                          <input type="number" class="form-control priority-validation" id="mx-priority" required min="0"
-                            max="65535" placeholder="e.g. 10">
-                          <div class="invalid-feedback">
-                            Must be an integer between 0 and 65535.
-                          </div>
-                        </div>
-                      </div>
-                      <div class="col-6 col-md-3 col-lg-2">
-                        <div class="mb-3">
-                          <label for="mx-ttl" class="form-label">TTL (seconds)</label>
-                          <input type="number" class="form-control ttl-validation" id="mx-ttl" placeholder="(default)"
-                            min="60">
-                          <div class="invalid-feedback">Must be an integer of at least 60.</div>
-                        </div>
-                      </div>
-                    </div>
-                    <div class="row">
-                      <div class="col">
-                        <button type="button" class="btn btn-success" id="mx-button" onclick="create_record_mx(this)">Create
-                          Record</button>
-                      </div>
-                    </div>
-                  </div>
-                </form>
-              </div>
-
-              <!-- TXT RECORD (Consistent Hostname-first ordering) -->
-              <div class="tab-pane fade" id="txt-record" role="tabpanel" aria-labelledby="txt-tab">
-                <form id="txt-record-form" class="needs-validation" novalidate autocomplete="off"
-                  onsubmit="event.preventDefault(); create_record_txt(document.getElementById('txt-button'));">
-                  <div class="container-fluid px-0">
-                    <div class="row align-items-start">
-                      <div class="col-sm-6 col-lg-5">
-                        <div class="mb-3">
-                          <label for="txt-name" class="form-label">Hostname</label>
-                          <input type="text" class="form-control hostname-validation" id="txt-name" preview="true" value="" required
-                            placeholder="Enter @ or hostname (e.g. _dmarc)">
-                          <div class="invalid-feedback">
-                            Must be a valid DNS hostname (use <code>@</code> for the zone apex).
-                          </div>
-                          <small class="form-text text-body-secondary">FQDN: <span id="txt-name-preview" class="font-monospace">&nbsp;</span></small>
-                        </div>
-                      </div>
-                      <div class="col-sm-6 col-md-4 col-lg-3">
-                        <div class="mb-3">
-                          <label for="txt-ttl" class="form-label">TTL (seconds)</label>
-                          <input type="number" class="form-control ttl-validation" id="txt-ttl" placeholder="(default)"
-                            min="60">
-                          <div class="invalid-feedback">Must be an integer of at least 60.</div>
-                        </div>
-                      </div>
-                    </div>
-                    <div class="row align-items-start">
-                      <div class="col">
-                        <div class="mb-3">
-                          <label for="txt-value" class="form-label">TXT Value</label>
-                          <input type="text" class="form-control txt-validation font-monospace" id="txt-value" value="" required
-                            placeholder="e.g. v=spf1 mx -all (strings >255 chars are automatically split into quoted chunks)">
-                          <div class="invalid-feedback">
-                            Must not be empty.
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                    <div class="row">
-                      <div class="col">
-                        <button type="button" class="btn btn-success" id="txt-button"
-                          onclick="create_record_txt(this)">Create Record</button>
-                      </div>
-                    </div>
-                  </div>
-                </form>
-              </div>
-
-              <!-- NS RECORD -->
-              <div class="tab-pane fade" id="ns-record" role="tabpanel" aria-labelledby="ns-tab">
-                <form id="ns-record-form" class="needs-validation" novalidate autocomplete="off"
-                  onsubmit="event.preventDefault(); create_record_ns(document.getElementById('ns-button'));">
-                  <div class="container-fluid px-0">
-                    <div class="row align-items-start">
-                      <div class="col-sm-6 col-lg-5">
-                        <div class="mb-3">
-                          <label for="ns-name" class="form-label">Hostname (Zone or Delegated Subdomain)</label>
-                          <input type="text" class="form-control hostname-validation" id="ns-name" preview="true" value=""
-                            required placeholder="Enter @ or subdomain to delegate (e.g. sub)">
-                          <div class="invalid-feedback">
-                            Must be a valid DNS hostname (use <code>@</code> for the zone apex).
-                          </div>
-                          <small class="form-text text-body-secondary">FQDN: <span id="ns-name-preview" class="font-monospace">&nbsp;</span></small>
-                        </div>
-                      </div>
-                      <div class="col-sm-6 col-lg-4">
-                        <div class="mb-3">
-                          <label for="ns-nameserver" class="form-label">Nameserver Target</label>
-                          <input type="text" class="form-control nameserver-validation" id="ns-nameserver" preview="true"
-                            value="" required placeholder="e.g. ns2 or ns1.example.com.">
-                          <div class="invalid-feedback">
-                            Must be a valid nameserver hostname (<code>@</code> is not allowed).
-                          </div>
-                          <small class="form-text text-body-secondary d-block">Nameserver FQDN: <span id="ns-nameserver-preview" class="font-monospace">&nbsp;</span></small>
-                          <small class="form-text text-body-secondary">End external nameservers with a trailing dot (<code>.</code>).</small>
-                        </div>
-                      </div>
-                      <div class="col-sm-6 col-md-4 col-lg-3">
-                        <div class="mb-3">
-                          <label for="ns-ttl" class="form-label">TTL (seconds)</label>
-                          <input type="number" class="form-control ttl-validation" id="ns-ttl" placeholder="(default)"
-                            min="60">
-                          <div class="invalid-feedback">Must be an integer of at least 60.</div>
-                        </div>
-                      </div>
-                    </div>
-                    <div class="row">
-                      <div class="col">
-                        <button type="button" class="btn btn-success" id="ns-button" onclick="create_record_ns(this)">Create
-                          Record</button>
-                      </div>
-                    </div>
-                  </div>
-                </form>
-              </div>
-
-              <!-- SRV RECORD -->
-              <div class="tab-pane fade" id="srv-record" role="tabpanel" aria-labelledby="srv-tab">
-                <form id="srv-record-form" class="needs-validation" novalidate autocomplete="off"
-                  onsubmit="event.preventDefault(); create_record_srv(document.getElementById('srv-button'));">
-                  <div class="container-fluid px-0">
-                    <div class="row align-items-start">
-                      <div class="col-sm-6 col-lg-4">
-                        <div class="mb-3">
-                          <label for="srv-name" class="form-label">Service &amp; Protocol Hostname</label>
-                          <input type="text" class="form-control hostname-validation" id="srv-name" preview="true" value=""
-                            required placeholder="e.g. _sip._tcp">
-                          <div class="invalid-feedback">
-                            Must be a valid service hostname (e.g. <code>_ldap._tcp</code>).
-                          </div>
-                          <small class="form-text text-body-secondary">FQDN: <span id="srv-name-preview" class="font-monospace">&nbsp;</span></small>
-                        </div>
-                      </div>
-                      <div class="col-4 col-lg-2">
-                        <div class="mb-3">
-                          <label for="srv-priority" class="form-label">Priority</label>
-                          <input type="number" class="form-control priority-validation" id="srv-priority" required min="0"
-                            max="65535" placeholder="e.g. 10">
-                          <div class="invalid-feedback">0–65535</div>
-                        </div>
-                      </div>
-                      <div class="col-4 col-lg-2">
-                        <div class="mb-3">
-                          <label for="srv-weight" class="form-label">Weight</label>
-                          <input type="number" class="form-control priority-validation" id="srv-weight" required min="0"
-                            max="65535" placeholder="e.g. 5">
-                          <div class="invalid-feedback">0–65535</div>
-                        </div>
-                      </div>
-                      <div class="col-4 col-lg-2">
-                        <div class="mb-3">
-                          <label for="srv-port" class="form-label">Port</label>
-                          <input type="number" class="form-control priority-validation" id="srv-port" required min="0"
-                            max="65535" placeholder="e.g. 5060">
-                          <div class="invalid-feedback">0–65535</div>
-                        </div>
-                      </div>
-                      <div class="col-sm-6 col-lg-2">
-                        <div class="mb-3">
-                          <label for="srv-ttl" class="form-label">TTL (s)</label>
-                          <input type="number" class="form-control ttl-validation" id="srv-ttl" placeholder="(default)"
-                            min="60">
-                          <div class="invalid-feedback">&ge; 60</div>
-                        </div>
-                      </div>
-                    </div>
-                    <div class="row align-items-start">
-                      <div class="col-sm-8 col-lg-6">
-                        <div class="mb-3">
-                          <label for="srv-target" class="form-label">Target Hostname</label>
-                          <input type="text" class="form-control nameserver-validation" id="srv-target" preview="true"
-                            value="" required placeholder="e.g. sipserver or sip.example.com.">
-                          <div class="invalid-feedback">
-                            Must be a valid target hostname.
-                          </div>
-                          <small class="form-text text-body-secondary">Target FQDN: <span id="srv-target-preview" class="font-monospace">&nbsp;</span></small>
-                        </div>
-                      </div>
-                    </div>
-                    <div class="row">
-                      <div class="col">
-                        <button type="button" class="btn btn-success" id="srv-button" onclick="create_record_srv(this)">Create
-                          Record</button>
-                      </div>
-                    </div>
-                  </div>
-                </form>
-              </div>
-
-              <!-- CAA RECORD -->
-              <div class="tab-pane fade" id="caa-record" role="tabpanel" aria-labelledby="caa-tab">
-                <form id="caa-record-form" class="needs-validation" novalidate autocomplete="off"
-                  onsubmit="event.preventDefault(); create_record_caa(document.getElementById('caa-button'));">
-                  <div class="container-fluid px-0">
-                    <div class="row align-items-start">
-                      <div class="col-sm-6 col-lg-4">
-                        <div class="mb-3">
-                          <label for="caa-name" class="form-label">Hostname</label>
-                          <input type="text" class="form-control hostname-validation" id="caa-name" preview="true" value=""
-                            required placeholder="Enter @ or subdomain">
-                          <div class="invalid-feedback">
-                            Must be a valid DNS hostname (use <code>@</code> for the zone apex).
-                          </div>
-                          <small class="form-text text-body-secondary">FQDN: <span id="caa-name-preview" class="font-monospace">&nbsp;</span></small>
-                        </div>
-                      </div>
-                      <div class="col-4 col-lg-2">
-                        <div class="mb-3">
-                          <label for="caa-flags" class="form-label">Flags</label>
-                          <input type="number" class="form-control priority-validation" id="caa-flags" required min="0"
-                            max="255" value="0" placeholder="0 or 128">
-                          <div class="invalid-feedback">0–255</div>
-                        </div>
-                      </div>
-                      <div class="col-8 col-lg-2">
-                        <div class="mb-3">
-                          <label for="caa-tag" class="form-label">Tag</label>
-                          <select class="form-select" id="caa-tag">
-                            <option value="issue" selected>issue</option>
-                            <option value="issuewild">issuewild</option>
-                            <option value="iodef">iodef</option>
-                          </select>
-                        </div>
-                      </div>
-                      <div class="col-sm-8 col-lg-2">
-                        <div class="mb-3">
-                          <label for="caa-value" class="form-label">CA Value</label>
-                          <input type="text" class="form-control txt-validation" id="caa-value" value="" required
-                            placeholder="letsencrypt.org">
-                          <div class="invalid-feedback">Must not be empty.</div>
-                        </div>
-                      </div>
-                      <div class="col-sm-4 col-lg-2">
-                        <div class="mb-3">
-                          <label for="caa-ttl" class="form-label">TTL (s)</label>
-                          <input type="number" class="form-control ttl-validation" id="caa-ttl" placeholder="(default)"
-                            min="60">
-                          <div class="invalid-feedback">&ge; 60</div>
-                        </div>
-                      </div>
-                    </div>
-                    <div class="row">
-                      <div class="col">
-                        <button type="button" class="btn btn-success" id="caa-button" onclick="create_record_caa(this)">Create
-                          Record</button>
-                      </div>
-                    </div>
-                  </div>
-                </form>
-              </div>
-
+                </div>
+              </form>
             </div>
+
+            <!-- AAAA RECORD -->
+            <div class="tab-pane fade" id="aaaa-record" role="tabpanel" aria-labelledby="aaaa-tab">
+              <form id="aaaa-record-form" class="needs-validation" novalidate autocomplete="off"
+                onsubmit="event.preventDefault(); create_record_aaaa(document.getElementById('aaaa-button'));">
+                <div class="container-fluid px-0">
+                  <div class="row align-items-start">
+                    <div class="col-sm-6 col-lg-5">
+                      <div class="mb-3">
+                        <label for="aaaa-name" class="form-label">Hostname</label>
+                        <input type="text" class="form-control hostname-validation" id="aaaa-name" preview="true" value=""
+                          required placeholder="Enter @ or relative hostname (e.g. ipv6)">
+                        <div class="invalid-feedback">
+                          Must be a valid DNS hostname (use <code>@</code> for the zone apex).
+                        </div>
+                        <small class="form-text text-body-secondary"><span id="aaaa-name-preview" class="font-monospace">&nbsp;</span></small>
+                      </div>
+                    </div>
+                    <div class="col-sm-6 col-lg-3">
+                      <div class="mb-3">
+                        <label for="aaaa-ip" class="form-label">IPv6 Address</label>
+                        <input type="text" class="form-control aaaa-validation" id="aaaa-ip" value="" required
+                          placeholder="e.g. 2001:db8::1">
+                        <div class="invalid-feedback">
+                          Must be a valid IPv6 address (without %zone index).
+                        </div>
+                      </div>
+                    </div>
+                    <div class="col-sm-6 col-md-4 col-lg-2">
+                      <div class="mb-3">
+                        <label for="aaaa-ttl" class="form-label">TTL</label>
+                        <input type="number" class="form-control ttl-validation" id="aaaa-ttl" placeholder="(default)"
+                          min="60">
+                        <div class="invalid-feedback">Must be an integer of at least 60.</div>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="row">
+                    <div class="col">
+                      <button type="button" class="btn btn-success" id="aaaa-button"
+                        onclick="create_record_aaaa(this)">Create Record</button>
+                    </div>
+                  </div>
+                </div>
+              </form>
+            </div>
+
+            <!-- CNAME RECORD -->
+            <div class="tab-pane fade" id="cname-record" role="tabpanel" aria-labelledby="cname-tab">
+              <form id="cname-record-form" class="needs-validation" novalidate autocomplete="off"
+                onsubmit="event.preventDefault(); create_record_cname(document.getElementById('cname-button'));">
+                <div class="container-fluid px-0">
+                  <div class="row align-items-start">
+                    <div class="col-sm-6 col-lg-5">
+                      <div class="mb-3">
+                        <label for="cname-name" class="form-label">Alias Hostname</label>
+                        <input type="text" class="form-control cname-hostname-validation" id="cname-name" preview="true" value=""
+                          required placeholder="Enter subdomain (e.g. blog, www)">
+                        <div class="invalid-feedback">
+                          Must be a valid subdomain hostname.
+                        </div>
+                        <small class="form-text text-body-secondary"><span id="cname-name-preview" class="font-monospace">&nbsp;</span></small>
+                      </div>
+                    </div>
+                    <div class="col-sm-6 col-lg-3">
+                      <div class="mb-3">
+                        <label for="cname-alias" class="form-label">Target (Canonical Name)</label>
+                        <input type="text" class="form-control hostname-validation" id="cname-alias" preview="true" value=""
+                          required placeholder="e.g. @, web, or host.example.com.">
+                        <div class="invalid-feedback">
+                          Must be a valid target hostname or <code>@</code>.
+                        </div>
+                        <small class="form-text text-body-secondary"><span id="cname-alias-preview" class="font-monospace">&nbsp;</span></small>
+                      </div>
+                    </div>
+                    <div class="col-sm-6 col-md-4 col-lg-2">
+                      <div class="mb-3">
+                        <label for="cname-ttl" class="form-label">TTL</label>
+                        <input type="number" class="form-control ttl-validation" id="cname-ttl" placeholder="(default)"
+                          min="60">
+                        <div class="invalid-feedback">Must be an integer of at least 60.</div>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="row">
+                    <div class="col">
+                      <button type="button" class="btn btn-success" id="cname-button"
+                        onclick="create_record_cname(this)">Create Record</button>
+                    </div>
+                  </div>
+                </div>
+              </form>
+            </div>
+
+            <!-- MX RECORD -->
+            <div class="tab-pane fade" id="mx-record" role="tabpanel" aria-labelledby="mx-tab">
+              <form id="mx-record-form" class="needs-validation" novalidate autocomplete="off"
+                onsubmit="event.preventDefault(); create_record_mx(document.getElementById('mx-button'));">
+                <div class="container-fluid px-0">
+                  <div class="row align-items-start">
+                    <div class="col-sm-6 col-lg-4">
+                      <div class="mb-3">
+                        <label for="mx-name" class="form-label">Hostname</label>
+                        <input type="text" class="form-control hostname-validation" id="mx-name" preview="true" value=""
+                          required placeholder="Enter @ or subdomain">
+                        <div class="invalid-feedback">
+                          Must be a valid DNS hostname (use <code>@</code> for the zone apex).
+                        </div>
+                        <small class="form-text text-body-secondary"><span id="mx-name-preview" class="font-monospace">&nbsp;</span></small>
+                      </div>
+                    </div>
+                    <div class="col-sm-6 col-lg-4">
+                      <div class="mb-3">
+                        <label for="mx-host" class="form-label">Mail server hostname</label>
+                        <input type="text" class="form-control hostname-validation" id="mx-host" preview="true" value=""
+                          required placeholder="e.g. mail or mail.example.com.">
+                        <div class="invalid-feedback">
+                          Must be a valid mail server hostname.
+                        </div>
+                        <small class="form-text text-body-secondary"><span id="mx-host-preview" class="font-monospace">&nbsp;</span></small>
+                      </div>
+                    </div>
+                    <div class="col-6 col-md-3 col-lg-2">
+                      <div class="mb-3">
+                        <label for="mx-priority" class="form-label">Priority</label>
+                        <input type="number" class="form-control priority-validation" id="mx-priority" required min="0"
+                          max="65535" placeholder="e.g. 10">
+                        <div class="invalid-feedback">
+                          Must be an integer between 0 and 65535.
+                        </div>
+                      </div>
+                    </div>
+                    <div class="col-6 col-md-3 col-lg-2">
+                      <div class="mb-3">
+                        <label for="mx-ttl" class="form-label">TTL</label>
+                        <input type="number" class="form-control ttl-validation" id="mx-ttl" placeholder="(default)"
+                          min="60">
+                        <div class="invalid-feedback">Must be an integer of at least 60.</div>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="row">
+                    <div class="col">
+                      <button type="button" class="btn btn-success" id="mx-button" onclick="create_record_mx(this)">Create
+                        Record</button>
+                    </div>
+                  </div>
+                </div>
+              </form>
+            </div>
+
+            <!-- TXT RECORD -->
+            <div class="tab-pane fade" id="txt-record" role="tabpanel" aria-labelledby="txt-tab">
+              <form id="txt-record-form" class="needs-validation" novalidate autocomplete="off"
+                onsubmit="event.preventDefault(); create_record_txt(document.getElementById('txt-button'));">
+                <div class="container-fluid px-0">
+                  <div class="row align-items-start">
+                    <div class="col-sm-6 col-lg-5">
+                      <div class="mb-3">
+                        <label for="txt-name" class="form-label">Hostname</label>
+                        <input type="text" class="form-control hostname-validation" id="txt-name" preview="true" value="" required
+                          placeholder="Enter @ or hostname (e.g. _dmarc)">
+                        <div class="invalid-feedback">
+                          Must be a valid DNS hostname (use <code>@</code> for the zone apex).
+                        </div>
+                        <small class="form-text text-body-secondary"><span id="txt-name-preview" class="font-monospace">&nbsp;</span></small>
+                      </div>
+                    </div>
+                    <div class="col-sm-6 col-md-4 col-lg-2">
+                      <div class="mb-3">
+                        <label for="txt-ttl" class="form-label">TTL</label>
+                        <input type="number" class="form-control ttl-validation" id="txt-ttl" placeholder="(default)"
+                          min="60">
+                        <div class="invalid-feedback">Must be an integer of at least 60.</div>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="row align-items-start">
+                    <div class="col">
+                      <div class="mb-3">
+                        <label for="txt-value" class="form-label">Value</label>
+                        <input type="text" class="form-control txt-validation font-monospace" id="txt-value" value="" required
+                          placeholder="Paste TXT string here (e.g. v=spf1 mx -all)">
+                        <div class="invalid-feedback">
+                          Must not be empty.
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="row">
+                    <div class="col">
+                      <button type="button" class="btn btn-success" id="txt-button"
+                        onclick="create_record_txt(this)">Create Record</button>
+                    </div>
+                  </div>
+                </div>
+              </form>
+            </div>
+
+            <!-- NS RECORD -->
+            <div class="tab-pane fade" id="ns-record" role="tabpanel" aria-labelledby="ns-tab">
+              <form id="ns-record-form" class="needs-validation" novalidate autocomplete="off"
+                onsubmit="event.preventDefault(); create_record_ns(document.getElementById('ns-button'));">
+                <div class="container-fluid px-0">
+                  <div class="row align-items-start">
+                    <div class="col-sm-6 col-lg-5">
+                      <div class="mb-3">
+                        <label for="ns-name" class="form-label">Hostname</label>
+                        <input type="text" class="form-control hostname-validation" id="ns-name" preview="true" value=""
+                          required placeholder="Enter @ or subdomain to delegate (e.g. sub)">
+                        <div class="invalid-feedback">
+                          Must be a valid DNS hostname (use <code>@</code> for the zone apex).
+                        </div>
+                        <small class="form-text text-body-secondary"><span id="ns-name-preview" class="font-monospace">&nbsp;</span></small>
+                      </div>
+                    </div>
+                    <div class="col-sm-6 col-lg-3">
+                      <div class="mb-3">
+                        <label for="ns-nameserver" class="form-label">Nameserver</label>
+                        <input type="text" class="form-control nameserver-validation" id="ns-nameserver" preview="true"
+                          value="" required placeholder="e.g. ns2 or ns1.example.com.">
+                        <div class="invalid-feedback">
+                          Must be a valid nameserver hostname.
+                        </div>
+                        <small class="form-text text-body-secondary"><span id="ns-nameserver-preview" class="font-monospace">&nbsp;</span></small>
+                      </div>
+                    </div>
+                    <div class="col-sm-6 col-md-4 col-lg-2">
+                      <div class="mb-3">
+                        <label for="ns-ttl" class="form-label">TTL</label>
+                        <input type="number" class="form-control ttl-validation" id="ns-ttl" placeholder="(default)"
+                          min="60">
+                        <div class="invalid-feedback">Must be an integer of at least 60.</div>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="row">
+                    <div class="col">
+                      <button type="button" class="btn btn-success" id="ns-button" onclick="create_record_ns(this)">Create
+                        Record</button>
+                    </div>
+                  </div>
+                </div>
+              </form>
+            </div>
+
+            <!-- SRV RECORD -->
+            <div class="tab-pane fade" id="srv-record" role="tabpanel" aria-labelledby="srv-tab">
+              <form id="srv-record-form" class="needs-validation" novalidate autocomplete="off"
+                onsubmit="event.preventDefault(); create_record_srv(document.getElementById('srv-button'));">
+                <div class="container-fluid px-0">
+                  <div class="row align-items-start">
+                    <div class="col-sm-6 col-lg-4">
+                      <div class="mb-3">
+                        <label for="srv-name" class="form-label">Service Hostname</label>
+                        <input type="text" class="form-control hostname-validation" id="srv-name" preview="true" value=""
+                          required placeholder="e.g. _sip._tcp">
+                        <div class="invalid-feedback">
+                          Must be a valid service hostname (e.g. <code>_ldap._tcp</code>).
+                        </div>
+                        <small class="form-text text-body-secondary"><span id="srv-name-preview" class="font-monospace">&nbsp;</span></small>
+                      </div>
+                    </div>
+                    <div class="col-4 col-lg-2">
+                      <div class="mb-3">
+                        <label for="srv-priority" class="form-label">Priority</label>
+                        <input type="number" class="form-control priority-validation" id="srv-priority" required min="0"
+                          max="65535" placeholder="e.g. 10">
+                        <div class="invalid-feedback">0–65535</div>
+                      </div>
+                    </div>
+                    <div class="col-4 col-lg-2">
+                      <div class="mb-3">
+                        <label for="srv-weight" class="form-label">Weight</label>
+                        <input type="number" class="form-control priority-validation" id="srv-weight" required min="0"
+                          max="65535" placeholder="e.g. 5">
+                        <div class="invalid-feedback">0–65535</div>
+                      </div>
+                    </div>
+                    <div class="col-4 col-lg-2">
+                      <div class="mb-3">
+                        <label for="srv-port" class="form-label">Port</label>
+                        <input type="number" class="form-control priority-validation" id="srv-port" required min="0"
+                          max="65535" placeholder="e.g. 5060">
+                        <div class="invalid-feedback">0–65535</div>
+                      </div>
+                    </div>
+                    <div class="col-sm-6 col-lg-2">
+                      <div class="mb-3">
+                        <label for="srv-ttl" class="form-label">TTL</label>
+                        <input type="number" class="form-control ttl-validation" id="srv-ttl" placeholder="(default)"
+                          min="60">
+                        <div class="invalid-feedback">&ge; 60</div>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="row align-items-start">
+                    <div class="col-sm-8 col-lg-6">
+                      <div class="mb-3">
+                        <label for="srv-target" class="form-label">Target Hostname</label>
+                        <input type="text" class="form-control nameserver-validation" id="srv-target" preview="true"
+                          value="" required placeholder="e.g. sipserver or sip.example.com.">
+                        <div class="invalid-feedback">
+                          Must be a valid target hostname.
+                        </div>
+                        <small class="form-text text-body-secondary"><span id="srv-target-preview" class="font-monospace">&nbsp;</span></small>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="row">
+                    <div class="col">
+                      <button type="button" class="btn btn-success" id="srv-button" onclick="create_record_srv(this)">Create
+                        Record</button>
+                    </div>
+                  </div>
+                </div>
+              </form>
+            </div>
+
+            <!-- CAA RECORD -->
+            <div class="tab-pane fade" id="caa-record" role="tabpanel" aria-labelledby="caa-tab">
+              <form id="caa-record-form" class="needs-validation" novalidate autocomplete="off"
+                onsubmit="event.preventDefault(); create_record_caa(document.getElementById('caa-button'));">
+                <div class="container-fluid px-0">
+                  <div class="row align-items-start">
+                    <div class="col-sm-6 col-lg-4">
+                      <div class="mb-3">
+                        <label for="caa-name" class="form-label">Hostname</label>
+                        <input type="text" class="form-control hostname-validation" id="caa-name" preview="true" value=""
+                          required placeholder="Enter @ or subdomain">
+                        <div class="invalid-feedback">
+                          Must be a valid DNS hostname (use <code>@</code> for the zone apex).
+                        </div>
+                        <small class="form-text text-body-secondary"><span id="caa-name-preview" class="font-monospace">&nbsp;</span></small>
+                      </div>
+                    </div>
+                    <div class="col-4 col-lg-2">
+                      <div class="mb-3">
+                        <label for="caa-flags" class="form-label">Flags</label>
+                        <input type="number" class="form-control priority-validation" id="caa-flags" required min="0"
+                          max="255" value="0" placeholder="0 or 128">
+                        <div class="invalid-feedback">0–255</div>
+                      </div>
+                    </div>
+                    <div class="col-8 col-lg-2">
+                      <div class="mb-3">
+                        <label for="caa-tag" class="form-label">Tag</label>
+                        <select class="form-select" id="caa-tag">
+                          <option value="issue" selected>issue</option>
+                          <option value="issuewild">issuewild</option>
+                          <option value="iodef">iodef</option>
+                        </select>
+                      </div>
+                    </div>
+                    <div class="col-sm-8 col-lg-2">
+                      <div class="mb-3">
+                        <label for="caa-value" class="form-label">CA Value</label>
+                        <input type="text" class="form-control txt-validation" id="caa-value" value="" required
+                          placeholder="letsencrypt.org">
+                        <div class="invalid-feedback">Must not be empty.</div>
+                      </div>
+                    </div>
+                    <div class="col-sm-4 col-lg-2">
+                      <div class="mb-3">
+                        <label for="caa-ttl" class="form-label">TTL</label>
+                        <input type="number" class="form-control ttl-validation" id="caa-ttl" placeholder="(default)"
+                          min="60">
+                        <div class="invalid-feedback">&ge; 60</div>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="row">
+                    <div class="col">
+                      <button type="button" class="btn btn-success" id="caa-button" onclick="create_record_caa(this)">Create
+                        Record</button>
+                    </div>
+                  </div>
+                </div>
+              </form>
+            </div>
+
           </div>
         </div>
 
@@ -644,78 +651,65 @@
 
       <!-- WORKSPACE 2: DYNAMIC DNS (DynDNS) -->
       <div class="tab-pane fade" id="dyndns" role="tabpanel" aria-labelledby="dyndns-tab">
-        <div class="card shadow-sm mb-4">
-          <div class="card-header bg-white py-3">
-            <h5 class="card-title mb-0"><i class="bi bi-arrow-repeat me-2"></i>Dynamic DNS (DynDNS) API</h5>
+        <div class="mb-4">
+          <h5 class="mb-3">Dynamic DNS API</h5>
+          <div class="input-group mb-4" style="max-width: 520px;">
+            <span class="input-group-text text-secondary bg-light border-end-0"><strong>YOUR API KEY</strong></span>
+            <input type="text" class="form-control bg-light font-monospace" id="dyndns-api-key"
+              value="{{user_token}}" readonly aria-label="Dynamic DNS API Key">
+            <button class="btn btn-outline-secondary" type="button" onclick="copy_text_value('{{user_token}}', this)">
+              <i class="bi bi-clipboard me-1"></i><span>Copy</span>
+            </button>
           </div>
-          <div class="card-body">
-            <label for="dyndns-api-key" class="form-label fw-semibold text-secondary small text-uppercase">Your API Key</label>
-            <div class="input-group mb-4">
-              <span class="input-group-text text-secondary"><i class="bi bi-key-fill me-1"></i><strong>API KEY</strong></span>
-              <input type="text" class="form-control bg-white font-monospace" id="dyndns-api-key"
-                value="{{user_token}}" readonly aria-label="Dynamic DNS API Key">
-              <button class="btn btn-outline-primary" type="button" onclick="copy_text_value('{{user_token}}', this)">
-                <i class="bi bi-clipboard me-1"></i><span>Copy key</span>
-              </button>
-            </div>
 
-            <h6>HTTP Update Endpoint</h6>
-            <p class="mb-2">
-              Create or update an <code>A</code> record in your zone (<code>{{user_origin}}</code>) by sending an HTTP <strong><code>POST</code></strong> request:
-            </p>
-            <div class="alert alert-light border font-monospace mb-2" role="alert">
-              POST {{website_url}}/update/{HOSTNAME}<br>
-              POST {{website_url}}/update/{HOSTNAME}?ip={NEW_IP}
-            </div>
-            <ul class="small text-body-secondary mb-4">
-              <li>
-                <strong><code>HOSTNAME</code></strong> must be the <strong>relative record name</strong> as it appears in your zone file (for example, <code>home</code> for <code>home.{{user_origin}}</code>, or <code>@</code> for the zone apex). If the record does not exist yet, it will be created automatically.
-              </li>
-              <li>
-                <strong><code>NEW_IP</code></strong> is optional. If omitted, the source IPv4 address of the HTTP request is used.
-              </li>
-            </ul>
+          <p class="mb-2">
+            Update an <code>A</code> record in your zone by sending an HTTP <code>POST</code> request:
+          </p>
+          <div class="bg-body-tertiary rounded-2 p-3 font-monospace mb-2">
+            POST {{website_url}}/update/{HOSTNAME}<br>
+            POST {{website_url}}/update/{HOSTNAME}?ip={NEW_IP}
+          </div>
+          <p class="ms-2 small text-body-secondary mb-4">
+            <strong>HOSTNAME</strong> must be the relative name as it appears in your zone file (e.g. <code>home</code> or <code>@</code>). If not present, it will be created.<br>
+            <strong>NEW_IP</strong> is optional. The external IP from the request will be used if omitted.
+          </p>
 
-            <h6>Authentication Methods</h6>
-            <p class="mb-2">Provide your API key using either an HTTP header or a URL query parameter:</p>
-            <div class="row g-3 mb-4">
-              <div class="col-12">
-                <div class="p-3 bg-body-tertiary border rounded">
-                  <div class="d-flex justify-content-between align-items-center mb-2">
-                    <span class="small fw-semibold">Option 1: As <code>X-API-Key</code> in the HTTP header (Recommended)</span>
-                    <button type="button" class="btn btn-sm btn-outline-secondary"
-                      onclick="copy_text_value(&quot;curl -X POST -H 'X-API-Key: {{user_token}}' '{{website_url}}/update/home'&quot;, this)">
-                      <i class="bi bi-clipboard me-1"></i><span>Copy command</span>
-                    </button>
-                  </div>
-                  <code class="d-block text-break">curl -X POST -H 'X-API-Key: {{user_token}}' '{{website_url}}/update/{HOSTNAME}'</code>
-                </div>
+          <h6>Authorization</h6>
+          <p class="mb-2">Provide your API key in one of two ways:</p>
+          <ul class="list-unstyled ms-2 mb-4">
+            <li class="mb-3">
+              <div class="d-flex justify-content-between align-items-center mb-1">
+                <span>As <code>X-API-Key</code> in the HTTP header:</span>
+                <button type="button" class="btn btn-sm btn-link text-secondary text-decoration-none p-0"
+                  onclick="copy_text_value(&quot;curl -X POST -H 'X-API-Key: {{user_token}}' '{{website_url}}/update/{HOSTNAME}'&quot;, this)">
+                  <i class="bi bi-clipboard me-1"></i><span>Copy</span>
+                </button>
               </div>
-              <div class="col-12">
-                <div class="p-3 bg-body-tertiary border rounded">
-                  <div class="d-flex justify-content-between align-items-center mb-2">
-                    <span class="small fw-semibold">Option 2: As <code>api_key</code> in the URL query string</span>
-                    <button type="button" class="btn btn-sm btn-outline-secondary"
-                      onclick="copy_text_value(&quot;curl -X POST '{{website_url}}/update/home?api_key={{user_token}}'&quot;, this)">
-                      <i class="bi bi-clipboard me-1"></i><span>Copy command</span>
-                    </button>
-                  </div>
-                  <code class="d-block text-break">curl -X POST '{{website_url}}/update/{HOSTNAME}?api_key={{user_token}}'</code>
-                </div>
+              <div class="bg-body-tertiary rounded-2 p-3 font-monospace text-break">
+                curl -X POST -H 'X-API-Key: {{user_token}}' '{{website_url}}/update/{HOSTNAME}'
               </div>
-            </div>
+            </li>
+            <li>
+              <div class="d-flex justify-content-between align-items-center mb-1">
+                <span>As <code>api_key</code> in the URL query string:</span>
+                <button type="button" class="btn btn-sm btn-link text-secondary text-decoration-none p-0"
+                  onclick="copy_text_value(&quot;curl -X POST '{{website_url}}/update/{HOSTNAME}?api_key={{user_token}}'&quot;, this)">
+                  <i class="bi bi-clipboard me-1"></i><span>Copy</span>
+                </button>
+              </div>
+              <div class="bg-body-tertiary rounded-2 p-3 font-monospace text-break">
+                curl -X POST '{{website_url}}/update/{HOSTNAME}?api_key={{user_token}}'
+              </div>
+            </li>
+          </ul>
 
-            <h6>Automated Linux Systemd Service Installer</h6>
-            <p class="small text-body-secondary mb-2">
-              Run the following command on a Linux host to install a systemd timer (<code>dyndns.timer</code>) and updater script (<code>/usr/local/bin/dyndns.sh</code>):
-            </p>
-            <div class="p-3 bg-body-tertiary border rounded d-flex justify-content-between align-items-center gap-2">
-              <code class="text-break">curl -s {{website_url}}/dyndns_install.sh | bash</code>
-              <button type="button" class="btn btn-sm btn-outline-secondary text-nowrap"
-                onclick="copy_text_value('curl -s {{website_url}}/dyndns_install.sh | bash', this)">
-                <i class="bi bi-clipboard me-1"></i><span>Copy</span>
-              </button>
-            </div>
+          <h6>Install the DynDNS service</h6>
+          <div class="d-flex justify-content-between align-items-center bg-body-tertiary rounded-2 p-3 font-monospace gap-2">
+            <span class="text-break">curl -s {{website_url}}/dyndns_install.sh | bash</span>
+            <button type="button" class="btn btn-sm btn-link text-secondary text-decoration-none p-0 text-nowrap"
+              onclick="copy_text_value('curl -s {{website_url}}/dyndns_install.sh | bash', this)">
+              <i class="bi bi-clipboard me-1"></i><span>Copy</span>
+            </button>
           </div>
         </div>
       </div>
@@ -726,7 +720,7 @@
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"
     integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz"
     crossorigin="anonymous"></script>
-  <script type="module" src="/static/js/main.js?v=6"></script>
+  <script type="module" src="/static/js/main.js?v=8"></script>
 </body>
 
 </html>

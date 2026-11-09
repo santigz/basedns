@@ -110,8 +110,8 @@ function zone_table_row(type, name, value, ttl, zone_ttl, id, deletable = true, 
 
   let html = `
           <tr${row_class}>
-              <th scope="row"><span class="badge text-bg-light border text-dark font-monospace">${safe_type}</span></th>
-              <td class="copy-fqdn"><span class="name font-monospace">${name_html}</span>${punycode_hint}<span class="copy-fqdn-hint badge text-bg-light border text-primary" role="button" tabindex="0" title="Copy Fully Qualified Domain Name">copy FQDN</span></td>
+              <th scope="row" class="font-monospace">${safe_type}</th>
+              <td class="copy-fqdn"><span class="name font-monospace">${name_html}</span>${punycode_hint}<span class="copy-fqdn-hint text-primary" role="button" tabindex="0" title="Copy Fully Qualified Domain Name">copy FQDN</span></td>
               <td class="font-monospace text-break">${safe_value}</td>
               <td>${ttl_show}</td>
         `;
@@ -119,18 +119,18 @@ function zone_table_row(type, name, value, ttl, zone_ttl, id, deletable = true, 
     html += ` <td class="text-end text-nowrap">`;
     if (can_edit) {
       html += `
-                  <button type="button" class="btn btn-sm btn-outline-secondary me-1" rr_id="${escape_html(id)}" onclick="edit_rr(this)" title="Edit record">
+                  <button type="button" class="btn btn-sm btn-link text-secondary row-action-btn rounded-1" rr_id="${escape_html(id)}" onclick="edit_rr(this)" title="Edit record">
                     <i class="bi bi-pencil"></i> Edit
                   </button>`;
     }
     html += `
-                  <button type="button" class="btn btn-sm btn-outline-danger" rr_id="${escape_html(id)}" onclick="delete_rr(this)" title="Delete record">
+                  <button type="button" class="btn btn-sm btn-link text-danger row-action-btn rounded-1" rr_id="${escape_html(id)}" onclick="delete_rr(this)" title="Delete record">
                     <i class="bi bi-trash"></i> Delete
                   </button>
               </td>`;
   } else {
     html += ` <td class="text-end">
-                  <small class="text-body-secondary" title="Required by parent zone delegation and SOA MNAME"><i class="bi bi-lock-fill me-1"></i>Not deletable (delegation)</small>
+                  <small class="text-body-secondary" title="Required by parent zone delegation and SOA MNAME"><i class="bi bi-lock me-1"></i>Not deletable (delegation)</small>
               </td>`;
   }
   html += '</tr>';
@@ -459,6 +459,7 @@ function init_page() {
   fix_ttl_placeholder();
   set_input_validations();
   set_input_previews();
+  set_change_origin_listeners();
 }
 
 function create_record_a(button) {
@@ -1172,6 +1173,172 @@ function reset_zone() {
     });
 }
 
+function get_root_domain(origin = user_origin) {
+  if (!origin) return '';
+  const idx = origin.indexOf('.');
+  return idx !== -1 ? origin.slice(idx + 1) : origin;
+}
+
+function get_origin_subdomain_error(value, current_origin = user_origin) {
+  if (value === undefined || value === null || value === '') {
+    return 'Subdomain cannot be empty.';
+  }
+  const trimmed = String(value).trim();
+  if (!trimmed) {
+    return 'Subdomain cannot be empty.';
+  }
+  if (/\s/.test(trimmed)) {
+    return 'Subdomain cannot contain spaces or whitespace.';
+  }
+  if (trimmed.includes('@')) {
+    return 'Subdomain cannot contain "@".';
+  }
+  if (trimmed.includes('.')) {
+    return 'Subdomain must be a single label and cannot contain dots (".").';
+  }
+  if (trimmed.includes('*')) {
+    return 'Subdomain cannot contain wildcard ("*").';
+  }
+  if (trimmed.includes('_')) {
+    return 'Subdomain cannot contain underscores ("_"). Only letters, digits, and hyphens ("-") are allowed.';
+  }
+  if (trimmed.startsWith('-') || trimmed.endsWith('-')) {
+    return 'Subdomain cannot start or end with a hyphen ("-").';
+  }
+  const ascii = safe_to_ascii(trimmed).toLowerCase();
+  if (!ascii) {
+    return 'Subdomain contains invalid internationalized (IDN/Punycode) characters.';
+  }
+  if (ascii.length > 63) {
+    return `Subdomain cannot exceed 63 characters (currently ${ascii.length} characters).`;
+  }
+  if (ascii.startsWith('-') || ascii.endsWith('-')) {
+    return 'Subdomain cannot start or end with a hyphen ("-").';
+  }
+  if (!/^[a-z0-9-]+$/.test(ascii)) {
+    return 'Subdomain can only contain letters, digits, and hyphens ("-").';
+  }
+  if (ascii === 'ns') {
+    return 'Subdomain "ns" is reserved and cannot be used.';
+  }
+  if (current_origin) {
+    const current_sub = current_origin.split('.')[0].toLowerCase();
+    if (ascii === current_sub) {
+      return 'This is already your current zone origin.';
+    }
+  }
+  return null;
+}
+
+function validate_new_origin_input(input) {
+  if (!input) return false;
+  const err = get_origin_subdomain_error(input.value, user_origin);
+  set_input_validation_state(input, err);
+  return err === null;
+}
+
+function evaluate_change_origin_form() {
+  if (typeof document === 'undefined') return false;
+  const input = document.getElementById('new-origin-input');
+  const ack = document.getElementById('change-origin-ack');
+  const submitBtn = document.getElementById('change-origin-submit');
+  if (!input || !submitBtn) return false;
+  const raw = input.value ? input.value.trim() : '';
+  const err = raw ? get_origin_subdomain_error(raw, user_origin) : 'Subdomain cannot be empty.';
+  const isAcked = Boolean(ack && ack.checked);
+  const canSubmit = err === null && isAcked;
+  submitBtn.disabled = !canSubmit;
+  return canSubmit;
+}
+
+function set_change_origin_listeners() {
+  if (typeof document === 'undefined') return;
+  const suffixEl = document.getElementById('new-origin-root-suffix');
+  if (suffixEl) {
+    const root = get_root_domain(user_origin);
+    if (root) {
+      suffixEl.textContent = `.${root}`;
+    }
+  }
+  const input = document.getElementById('new-origin-input');
+  const ack = document.getElementById('change-origin-ack');
+  if (input && input.addEventListener) {
+    input.addEventListener('input', () => {
+      const err_span = document.querySelector('#change-origin-error-msg');
+      if (err_span && err_span.closest('div')) {
+        err_span.closest('div').classList.add('d-none');
+      }
+      if (input.value === '') {
+        set_input_validation_state(input, null);
+      } else {
+        validate_new_origin_input(input);
+      }
+      evaluate_change_origin_form();
+    });
+  }
+  if (ack && ack.addEventListener) {
+    ack.addEventListener('change', () => {
+      evaluate_change_origin_form();
+    });
+  }
+}
+
+function change_origin() {
+  if (typeof document === 'undefined') return;
+  const input = document.getElementById('new-origin-input');
+  const ack = document.getElementById('change-origin-ack');
+  const submitBtn = document.getElementById('change-origin-submit');
+  if (input && !validate_new_origin_input(input)) {
+    if (submitBtn) submitBtn.disabled = true;
+    return;
+  }
+  if (ack && !ack.checked) {
+    if (submitBtn) submitBtn.disabled = true;
+    return;
+  }
+  const subdomain = input ? safe_to_ascii(input.value.trim()).toLowerCase() : '';
+  if (submitBtn) submitBtn.disabled = true;
+
+  return fetch('/origin', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      subdomain,
+      acknowledge: true,
+    }),
+  })
+    .then(async response => {
+      if (response.ok) {
+        window.location.reload();
+        return;
+      }
+      let msg = 'Failed changing the zone origin.';
+      try {
+        const data = await response.json();
+        if (data && data.detail) {
+          msg = typeof data.detail === 'object' && data.detail.message
+            ? data.detail.message
+            : String(data.detail);
+        }
+      } catch {
+        // Fallback to default message
+      }
+      throw new Error(msg);
+    })
+    .catch(error => {
+      if (submitBtn) submitBtn.disabled = false;
+      const err_span = document.querySelector('#change-origin-error-msg');
+      if (err_span) {
+        err_span.textContent = error.message || 'Failed changing the zone origin.';
+        if (err_span.closest('div')) {
+          err_span.closest('div').classList.remove('d-none');
+        }
+      }
+    });
+}
+
 if (typeof window !== 'undefined') {
   Object.assign(window, {
     create_record_a,
@@ -1189,6 +1356,7 @@ if (typeof window !== 'undefined') {
     download_zonefile,
     copy_text_value,
     reset_zone,
+    change_origin,
     logout,
   });
 }
@@ -1261,6 +1429,12 @@ export {
   copy_zonefile,
   download_zonefile,
   reset_zone,
+  get_root_domain,
+  get_origin_subdomain_error,
+  validate_new_origin_input,
+  evaluate_change_origin_form,
+  set_change_origin_listeners,
+  change_origin,
   set_zone,
   get_zone,
   set_user_origin,

@@ -340,6 +340,194 @@ class TestDNSPlatformIntegration(unittest.TestCase):
                 f"Expected empty answer for CHAOS query {qname}, got {resp.answer}",
             )
 
+    def test_12_change_origin_resets_zone_and_updates_dns(self):
+        """Verify POST /origin changes a user's zone origin, resets records, and updates BIND."""
+        ts = int(time.time())
+        u_name = f"origuser-{ts}"
+        custom_sub = f"custom-{ts}"
+        initial_origin = f"{u_name}.{ROOT_DOMAIN}"
+        custom_origin = f"{custom_sub}.{ROOT_DOMAIN}"
+        u_headers = {"Remote-User": u_name}
+
+        # 1. Initialize user and add a custom A record
+        r_init = requests.get(f"{BASE_URL}/", headers=u_headers, timeout=5)
+        self.assertEqual(r_init.status_code, 200)
+        z_data = self.get_zonefile(headers=u_headers)
+        self.assertEqual(
+            self.put_zonefile(
+                z_data + "\noldrec\tIN\tA\t192.0.2.111\n", headers=u_headers
+            ).status_code,
+            200,
+        )
+        self.assertEqual(
+            [r.address for r in self.query_dns("oldrec", "A", origin=initial_origin)],
+            ["192.0.2.111"],
+        )
+
+        # 2. Unacknowledged origin change must be rejected with 400
+        no_ack = requests.post(
+            f"{BASE_URL}/origin",
+            json={"subdomain": custom_sub, "acknowledge": False},
+            headers=u_headers,
+            timeout=5,
+        )
+        self.assertEqual(no_ack.status_code, 400)
+
+        # 3. Change origin with acknowledge=True
+        change_resp = requests.post(
+            f"{BASE_URL}/origin",
+            json={"subdomain": custom_sub, "acknowledge": True},
+            headers=u_headers,
+            timeout=5,
+        )
+        self.assertEqual(change_resp.status_code, 200, f"Origin change failed: {change_resp.text}")
+        self.assertEqual(change_resp.json()["origin"], custom_origin)
+
+        # 4. Old origin is no longer served (NXDOMAIN) and new origin serves SOA & NS
+        with self.assertRaises(dns.resolver.NXDOMAIN):
+            self.query_dns("@", "SOA", origin=initial_origin)
+
+        soa_ans = self.query_dns("@", "SOA", origin=custom_origin)
+        self.assertEqual(str(soa_ans[0].mname), f"ns.{custom_origin}")
+
+        # 5. Rejects reserved 'ns' and already-taken subdomain with 409
+        res_ns = requests.post(
+            f"{BASE_URL}/origin",
+            json={"subdomain": "ns", "acknowledge": True},
+            headers=u_headers,
+            timeout=5,
+        )
+        self.assertEqual(res_ns.status_code, 409)
+
+        # 6. User B tries to change origin to User A's new custom_sub -> 409 Conflict,
+        #    and User B's existing zone & records remain intact in DNS
+        user_b = f"seconduser-{ts}"
+        user_b_origin = f"{user_b}.{ROOT_DOMAIN}"
+        b_headers = {"Remote-User": user_b}
+        requests.get(f"{BASE_URL}/", headers=b_headers, timeout=5)
+        b_zone = self.get_zonefile(headers=b_headers)
+        self.assertEqual(
+            self.put_zonefile(
+                b_zone + "\nbhost\tIN\tA\t192.0.2.222\n", headers=b_headers
+            ).status_code,
+            200,
+        )
+        b_conflict = requests.post(
+            f"{BASE_URL}/origin",
+            json={"subdomain": custom_sub.upper(), "acknowledge": True},
+            headers=b_headers,
+            timeout=5,
+        )
+        self.assertEqual(b_conflict.status_code, 409)
+        self.assertEqual(
+            [r.address for r in self.query_dns("bhost", "A", origin=user_b_origin)],
+            ["192.0.2.222"],
+        )
+
+        # 7. User A changes to a third name, freeing custom_sub -> User B can now claim custom_sub!
+        third_sub = f"third-{ts}"
+        a_move = requests.post(
+            f"{BASE_URL}/origin",
+            json={"subdomain": third_sub, "acknowledge": True},
+            headers=u_headers,
+            timeout=5,
+        )
+        self.assertEqual(a_move.status_code, 200)
+
+        b_claim = requests.post(
+            f"{BASE_URL}/origin",
+            json={"subdomain": custom_sub, "acknowledge": True},
+            headers=b_headers,
+            timeout=5,
+        )
+        self.assertEqual(b_claim.status_code, 200)
+        self.assertEqual(b_claim.json()["origin"], custom_origin)
+        with self.assertRaises(dns.resolver.NXDOMAIN):
+            self.query_dns("bhost", "A", origin=user_b_origin)
+        soa_b_new = self.query_dns("@", "SOA", origin=custom_origin)
+        self.assertEqual(str(soa_b_new[0].mname), f"ns.{custom_origin}")
+
+    def test_13_new_user_with_taken_default_subdomain_gets_numeric_suffix(self):
+        """
+        Multi-user pre-claim and numeric suffix scenarios:
+        - User A claims 'userc-<ts>' before 'userc-<ts>' exists -> 'userc-<ts>' logs in and gets 'userc-<ts>-1'.
+        - If 'userd-<ts>' AND 'userd-<ts>-1' are both claimed before 'userd-<ts>' logs in -> 'userd-<ts>' gets 'userd-<ts>-2'.
+        - When User A later vacates 'userc-<ts>', 'userc-<ts>' can reclaim their own default name 'userc-<ts>'.
+        """
+        ts = int(time.time()) + 1
+        user_a = f"usera-{ts}"
+        user_b = f"userb-{ts}"
+        user_c = f"userc-{ts}"
+        user_d = f"userd-{ts}"
+        a_headers = {"Remote-User": user_a}
+        b_headers = {"Remote-User": user_b}
+        c_headers = {"Remote-User": user_c}
+        d_headers = {"Remote-User": user_d}
+
+        # 1. User A initializes and changes origin to user_c before user_c ever logs in
+        requests.get(f"{BASE_URL}/", headers=a_headers, timeout=5)
+        c_resp = requests.post(
+            f"{BASE_URL}/origin",
+            json={"subdomain": user_c, "acknowledge": True},
+            headers=a_headers,
+            timeout=5,
+        )
+        self.assertEqual(c_resp.status_code, 200)
+
+        # 2. Now user_c logs in for the first time -> lands on userc-<ts>-1
+        t_resp = requests.get(f"{BASE_URL}/", headers=c_headers, timeout=5)
+        self.assertEqual(t_resp.status_code, 200)
+        expected_c_fallback = f"{user_c}-1.{ROOT_DOMAIN}"
+        self.assertIn(expected_c_fallback, t_resp.text)
+
+        # 3. Both userc-<ts> (User A) and userc-<ts>-1 (User C) resolve via DNS
+        soa_claimed = self.query_dns("@", "SOA", origin=f"{user_c}.{ROOT_DOMAIN}")
+        self.assertEqual(str(soa_claimed[0].mname), f"ns.{user_c}.{ROOT_DOMAIN}")
+
+        soa_fallback = self.query_dns("@", "SOA", origin=expected_c_fallback)
+        self.assertEqual(str(soa_fallback[0].mname), f"ns.{expected_c_fallback}")
+
+        # 4. User A claims user_d AND User B claims user_d-1 before user_d logs in -> user_d gets user_d-2
+        requests.get(f"{BASE_URL}/", headers=b_headers, timeout=5)
+        self.assertEqual(
+            requests.post(
+                f"{BASE_URL}/origin",
+                json={"subdomain": user_d, "acknowledge": True},
+                headers=a_headers,
+                timeout=5,
+            ).status_code,
+            200,
+        )
+        self.assertEqual(
+            requests.post(
+                f"{BASE_URL}/origin",
+                json={"subdomain": f"{user_d}-1", "acknowledge": True},
+                headers=b_headers,
+                timeout=5,
+            ).status_code,
+            200,
+        )
+        d_resp = requests.get(f"{BASE_URL}/", headers=d_headers, timeout=5)
+        self.assertEqual(d_resp.status_code, 200)
+        expected_d_fallback = f"{user_d}-2.{ROOT_DOMAIN}"
+        self.assertIn(expected_d_fallback, d_resp.text)
+        soa_d = self.query_dns("@", "SOA", origin=expected_d_fallback)
+        self.assertEqual(str(soa_d[0].mname), f"ns.{expected_d_fallback}")
+
+        # 5. Since User A moved from user_c to user_d, user_c can now reclaim their own name 'user_c'!
+        reclaim_resp = requests.post(
+            f"{BASE_URL}/origin",
+            json={"subdomain": user_c, "acknowledge": True},
+            headers=c_headers,
+            timeout=5,
+        )
+        self.assertEqual(reclaim_resp.status_code, 200)
+        self.assertEqual(reclaim_resp.json()["origin"], f"{user_c}.{ROOT_DOMAIN}")
+        with self.assertRaises(dns.resolver.NXDOMAIN):
+            self.query_dns("@", "SOA", origin=expected_c_fallback)
+        soa_c_reclaimed = self.query_dns("@", "SOA", origin=f"{user_c}.{ROOT_DOMAIN}")
+        self.assertEqual(str(soa_c_reclaimed[0].mname), f"ns.{user_c}.{ROOT_DOMAIN}")
+
 
 if __name__ == "__main__":
     print(
