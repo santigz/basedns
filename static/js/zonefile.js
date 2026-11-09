@@ -676,3 +676,29 @@ let splitArgs = function (input, sep, keepQuotes) {
   }
   return ret;
 };
+
+export {
+  defaultTemplate,
+  generate,
+  parse,
+  formatTxtData,
+  chunkTxtString,
+  removeComments,
+  flatten,
+  normalizeRR,
+  parseRRs,
+  resolveMissingName,
+  parseSOA,
+  parseNS,
+  parseA,
+  parseAAAA,
+  parseCNAME,
+  parseMX,
+  parseTXT,
+  parsePTR,
+  parseSRV,
+  parseSPF,
+  parseCAA,
+  parseDS,
+  splitArgs,
+};

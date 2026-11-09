@@ -367,11 +367,21 @@ class ZoneManager(object):
             raise RecordUpdateError('Zone file does not exist')
         zone_lines = zonefile.read_text().splitlines()
         pattern = re.compile(rf'^{re.escape(hostname)}\s+(\d+\s+)?IN\s+A\s+\d+\.\d+\.\d+\.\d+')
+        soa_pattern = re.compile(
+            r'^(\S*\s*(?:\d+\s+)?IN\s+SOA\s+\S+\s+\S+\s+\(?)\s*(\d+)(\s+\d+\s+\d+\s+\d+\s+\d+\)?.*)$',
+            re.IGNORECASE,
+        )
         record_found = False
         updated_zone_data = []
         ttl = f'{ttl}\t' if ttl else ''
         for line in zone_lines:
-            if pattern.match(line):
+            soa_match = soa_pattern.match(line)
+            if soa_match:
+                now_sec = int(datetime.now().timestamp())
+                old_serial = int(soa_match.group(2))
+                new_serial = max(now_sec, old_serial + 1)
+                updated_zone_data.append(f'{soa_match.group(1)}{new_serial}{soa_match.group(3)}')
+            elif pattern.match(line):
                 updated_zone_data.append(f'{hostname}\t{ttl}IN\tA\t{ip}')
                 record_found = True
             else:

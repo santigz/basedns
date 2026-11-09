@@ -46,6 +46,7 @@ sudo tee "$EXECUTABLE" > /dev/null <<EOF
 # This script performs DynDNS for dns-portal
 
 # Edit these variables for your needs
+# DOMAIN must be the relative hostname in your zone (e.g. 'home' or '@')
 API_KEY=''
 DOMAIN=''
 
@@ -57,9 +58,9 @@ sudo chmod a+x $EXECUTABLE
 
 echo 'Files installed.'
 echo
-echo "Please, edit the this file with your data: $EXECUTABLE"
+echo "Please edit this file with your data: $EXECUTABLE"
 echo "  API_KEY='your_api_key_here'"
-echo "  DOMAIN='your_domain_here'"
+echo "  DOMAIN='your_relative_hostname_here'  # e.g. 'home' or '@'"
 echo
 echo "Then, you can start the timer:"
 echo "  sudo systemctl enable --now dyndns.timer"

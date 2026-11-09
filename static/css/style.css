@@ -1,9 +1,38 @@
-.copy-fqdn-hint {
-  visibility: hidden;
-  margin-left: 8px;
+.copy-fqdn {
   cursor: pointer;
 }
 
-.copy-fqdn:hover .copy-fqdn-hint {
-  visibility: visible;
+.copy-fqdn-hint {
+  opacity: 0;
+  margin-left: 8px;
+  cursor: pointer;
+  font-size: 0.75rem;
+  transition: opacity 0.15s ease-in-out;
+  user-select: none;
+}
+
+.copy-fqdn:hover .copy-fqdn-hint,
+.copy-fqdn:focus-within .copy-fqdn-hint,
+.copy-fqdn-hint:focus {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .copy-fqdn-hint {
+    opacity: 1;
+  }
+}
+
+.soa-summary-bar {
+  font-size: 0.85rem;
+}
+
+.soa-summary-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+tr.editing-record-row {
+  background-color: var(--bs-warning-bg-subtle) !important;
 }
