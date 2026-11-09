@@ -631,7 +631,7 @@ function create_record_generic(button, type, rr_dict) {
 function set_field_value(id, value) {
   const el = document.getElementById(id);
   if (!el) return;
-  el.value = value ?? '';
+  el.value = value !== undefined && value !== null ? String(value) : '';
   el.classList.remove('is-invalid');
   update_input_preview(el);
 }

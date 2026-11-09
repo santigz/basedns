@@ -82,11 +82,47 @@ describe('Form Input Validations & SOA Serial Logic (main.js)', () => {
     };
 
     it('accepts valid relative, subdomain, wildcard, underscore, and IDN hostnames', () => {
-      for (const name of ['@', 'www', 'sub.domain', 'host-1', '123', '*', '*.sub', '_dmarc', 'españa']) {
+      for (const name of [
+        '@',
+        'www',
+        'sub.domain',
+        'host-1',
+        '123',
+        '*',
+        '*.sub',
+        '_dmarc',
+        'default._domainkey',
+        'selector-1._domainkey',
+        'google._domainkey.mail',
+        '_smtp._tls',
+        '_mta-sts',
+        'españa',
+      ]) {
         assert.equal(
           checkValidator(main.validate_hostname, name),
           true,
           `Expected "${name}" to be valid in validate_hostname`
+        );
+      }
+    });
+
+    it('accepts DKIM selector hostnames and external targets for CNAME-delegated DKIM (e.g. two-CNAME rotation)', () => {
+      for (const selector of ['selector1._domainkey', 'selector2._domainkey', 's1._domainkey.sub']) {
+        assert.equal(
+          checkValidator(main.validate_cname_hostname, selector),
+          true,
+          `Expected DKIM CNAME selector "${selector}" to be valid`
+        );
+      }
+      for (const target of [
+        'selector1-user-example-com._domainkey.example.onmicrosoft.com.',
+        's1.domainkey.u12345.wl.sendgrid.net.',
+        'abc123.dkim.amazonses.com.',
+      ]) {
+        assert.equal(
+          checkValidator(main.validate_hostname, target),
+          true,
+          `Expected DKIM CNAME target "${target}" to be valid`
         );
       }
     });

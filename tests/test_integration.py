@@ -15,7 +15,7 @@ import dns.resolver
 import dns.update
 import requests
 
-from app.dns_manager import BACKUPS_DIR, BIND_DIR, ZoneManager
+from app.dns_manager import BACKUPS_DIR, BIND_DIR, USER_ZONES_DIR, ZoneManager
 
 HOST = "127.0.0.1"
 HTTP_PORT = 80
@@ -44,11 +44,37 @@ class TestDNSPlatformIntegration(unittest.TestCase):
         cls.resolver.timeout = 3.0
         cls.resolver.lifetime = 3.0
 
+        # Snapshot existing user-zones and backups so running inside a live dev container
+        # does not clobber developer state or leave temporary test users behind.
+        zones_dir = Path(USER_ZONES_DIR)
+        cls._initial_user_zones = {}
+        if zones_dir.exists():
+            for p in zones_dir.iterdir():
+                if p.is_file():
+                    cls._initial_user_zones[p.name] = p.read_text()
+
+        backups_dir = Path(BACKUPS_DIR)
+        cls._initial_backups = (
+            {p.name for p in backups_dir.iterdir() if p.is_file()}
+            if backups_dir.exists()
+            else set()
+        )
+
         # Ensure the user zone is initialized by hitting '/'
         resp = requests.get(f"{BASE_URL}/", headers=cls.headers, timeout=5)
         if resp.status_code != 200:
             raise RuntimeError(
                 f"Failed to reach web app at {BASE_URL}/ (status {resp.status_code})"
+            )
+
+        # If 'user' had a custom origin in a running dev container (e.g. user@santi),
+        # switch 'user' back to default 'user.example.com.' for the test run.
+        if f'content="{USER_ORIGIN}"' not in resp.text:
+            requests.post(
+                f"{BASE_URL}/origin",
+                json={"subdomain": TEST_USER, "acknowledge": True},
+                headers=cls.headers,
+                timeout=5,
             )
 
         # Extract the user's API token from the rendered HTML page for DynDNS tests
@@ -64,8 +90,28 @@ class TestDNSPlatformIntegration(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
-        # Leave the zone in a clean reset state after all tests finish
-        requests.post(f"{BASE_URL}/reset_zonefile", headers=cls.headers, timeout=5)
+        # Restore exact initial user-zones and backups state
+        zones_dir = Path(USER_ZONES_DIR)
+        if zones_dir.exists():
+            for p in list(zones_dir.iterdir()):
+                if p.is_file() and p.name not in cls._initial_user_zones:
+                    p.unlink(missing_ok=True)
+            for name, content in cls._initial_user_zones.items():
+                (zones_dir / name).write_text(content)
+            try:
+                zm = ZoneManager(ROOT_DOMAIN)
+                zm.reset_main_zone()
+                zm.reset_named_conf_local()
+            except Exception:
+                requests.post(f"{BASE_URL}/reset_zonefile", headers=cls.headers, timeout=5)
+        else:
+            requests.post(f"{BASE_URL}/reset_zonefile", headers=cls.headers, timeout=5)
+
+        backups_dir = Path(BACKUPS_DIR)
+        if backups_dir.exists():
+            for p in list(backups_dir.iterdir()):
+                if p.is_file() and p.name not in cls._initial_backups:
+                    p.unlink(missing_ok=True)
 
     def query_dns(self, qname: str, rdtype: str, origin: str = USER_ORIGIN):
         """Helper to query the BIND server for a record inside a given zone origin."""
@@ -527,6 +573,161 @@ class TestDNSPlatformIntegration(unittest.TestCase):
             self.query_dns("@", "SOA", origin=expected_c_fallback)
         soa_c_reclaimed = self.query_dns("@", "SOA", origin=f"{user_c}.{ROOT_DOMAIN}")
         self.assertEqual(str(soa_c_reclaimed[0].mname), f"ns.{user_c}.{ROOT_DOMAIN}")
+
+    def test_14_mail_server_spf_dmarc_and_dkim_key_lengths(self):
+        """
+        Verify complete mail server DNS configuration (MX, SPF, DMARC, and DKIM):
+        - Standard & >255-byte multi-chunk SPF TXT records (plus coexisting apex TXT records).
+        - DKIM keys across varying algorithms and key sizes:
+          * Ed25519 (~74 chars, 1 <character-string>)
+          * RSA-1024 (~234 chars, 1 <character-string>)
+          * RSA-1024 with extra tags (>255 chars, 2 <character-string> chunks)
+          * RSA-2048 (~410 chars, 2 <character-string> chunks in 1 TXT RR)
+          * RSA-4096 (~754 chars, 3 <character-string> chunks in 1 TXT RR, resolved over UDP/EDNS0 and TCP)
+          * opendkim-genkey multiline parenthesized TXT ( "..." "..." ) format
+        - Two-record CNAME-delegated DKIM rotation (selector1._domainkey & selector2._domainkey).
+        - Rejection of an unsplit >255-byte single <character-string> by named-checkzone (HTTP 400).
+        """
+        base_zone = self.get_zonefile()
+
+        ed25519_dkim = "v=DKIM1; k=ed25519; p=11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo="
+        rsa1024_b64 = (
+            "MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQC5N3lnvvrYgPCRSoqn+awTpE+i"
+            "GYcKBPpo8HHbcFfCIIV10Hwo4PhCoGZSaKVHOjDm4yefKXhQjM7iKzEPuBatE7O4"
+            "7hAx1CJpNuIdLxhILSbEmbMxJrJAG0HZVn8z6EAoOHZNaPHmK2h4UUrjOG8zA5BH"
+            "fzJf7tGwI+K619fFUwIDAQAB"
+        )
+        rsa1024_dkim = f"v=DKIM1; k=rsa; p={rsa1024_b64}"
+        rsa1024_tagged_dkim = f"v=DKIM1; h=sha256; k=rsa; s=email; t=y:s; p={rsa1024_b64}"
+        rsa2048_dkim = (
+            "v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA"
+            + ("A" * 340)
+            + "IDAQAB"
+        )
+        rsa4096_dkim = (
+            "v=DKIM1; k=rsa; p=MIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKCAgEA"
+            + ("B" * 684)
+            + "IDAQAB"
+        )
+        opendkim_p1 = "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA" + ("C" * 180)
+        opendkim_p2 = ("D" * 160) + "IDAQAB"
+        opendkim_expected = f"v=DKIM1; h=sha256; k=rsa; p={opendkim_p1}{opendkim_p2}"
+
+        short_spf = "v=spf1 mx a ip4:192.0.2.25 -all"
+        site_verify = "google-site-verification=mail-domain-verify-12345"
+        long_spf = (
+            "v=spf1 mx a ip4:192.0.2.0/24 ip4:198.51.100.0/24 ip4:203.0.113.0/24 ip6:2001:db8::/32 "
+            "include:_spf.google.com include:spf.protection.outlook.com "
+            "include:amazonses.com include:mailgun.org include:sendgrid.net "
+            "include:spf.messagingengine.com include:_spf.protonmail.ch include:servers.mcsv.net ~all"
+        )
+        dmarc_val = f"v=DMARC1; p=quarantine; pct=100; rua=mailto:dmarc@{USER_ORIGIN.rstrip('.')}"
+
+        def chunk_quotes(s: str, size: int = 255) -> str:
+            return " ".join(f'"{s[i:i + size]}"' for i in range(0, len(s), size))
+
+        mail_records = "\n".join(
+            [
+                "@\t300\tIN\tMX\t10\tmail",
+                "mail\t300\tIN\tA\t192.0.2.25",
+                f'@\t300\tIN\tTXT\t"{short_spf}"',
+                f'@\t300\tIN\tTXT\t"{site_verify}"',
+                f"bulk\t300\tIN\tTXT\t{chunk_quotes(long_spf)}",
+                f'_dmarc\t300\tIN\tTXT\t"{dmarc_val}"',
+                f"ed._domainkey\t300\tIN\tTXT\t{chunk_quotes(ed25519_dkim)}",
+                f"rsa1024._domainkey\t300\tIN\tTXT\t{chunk_quotes(rsa1024_dkim)}",
+                f"rsa1024tag._domainkey\t300\tIN\tTXT\t{chunk_quotes(rsa1024_tagged_dkim)}",
+                f"rsa2048._domainkey\t300\tIN\tTXT\t{chunk_quotes(rsa2048_dkim)}",
+                f"rsa4096._domainkey\t300\tIN\tTXT\t{chunk_quotes(rsa4096_dkim)}",
+                (
+                    'opendkim._domainkey\t300\tIN\tTXT\t( "v=DKIM1; h=sha256; k=rsa; "\n'
+                    f'\t  "p={opendkim_p1}"\n'
+                    f'\t  "{opendkim_p2}" ) ; ----- DKIM key opendkim for {USER_ORIGIN}'
+                ),
+                "selector1._domainkey\t300\tIN\tCNAME\tselector1-user._domainkey.mailprovider.example.",
+                "selector2._domainkey\t300\tIN\tCNAME\tselector2-user._domainkey.mailprovider.example.",
+                "",
+            ]
+        )
+
+        resp = self.put_zonefile(base_zone + "\n" + mail_records)
+        self.assertEqual(resp.status_code, 200, f"Mail zone update failed: {resp.text}")
+
+        # 1. Verify MX & mail A record
+        mx_ans = self.query_dns("@", "MX")
+        self.assertEqual(mx_ans[0].preference, 10)
+        self.assertEqual(str(mx_ans[0].exchange), f"mail.{USER_ORIGIN}")
+
+        # 2. Verify coexisting apex TXT records (SPF + domain verification)
+        apex_txt_ans = self.query_dns("@", "TXT")
+        apex_txt_values = {b"".join(r.strings).decode("utf-8") for r in apex_txt_ans}
+        self.assertIn(short_spf, apex_txt_values)
+        self.assertIn(site_verify, apex_txt_values)
+
+        # 3. Verify >255-byte multi-chunk SPF record reassembles into the contiguous SPF policy
+        bulk_txt_ans = self.query_dns("bulk", "TXT")
+        self.assertEqual(len(bulk_txt_ans), 1)
+        self.assertEqual(len(bulk_txt_ans[0].strings), 2)
+        self.assertEqual(b"".join(bulk_txt_ans[0].strings).decode("utf-8"), long_spf)
+
+        # 4. Verify DMARC TXT record
+        dmarc_ans = self.query_dns("_dmarc", "TXT")
+        self.assertEqual(b"".join(dmarc_ans[0].strings).decode("utf-8"), dmarc_val)
+
+        # 5. Verify all DKIM key sizes and chunk counts via DNS queries
+        dkim_expectations = [
+            ("ed._domainkey", 1, ed25519_dkim),
+            ("rsa1024._domainkey", 1, rsa1024_dkim),
+            ("rsa1024tag._domainkey", 2, rsa1024_tagged_dkim),
+            ("rsa2048._domainkey", 2, rsa2048_dkim),
+            ("rsa4096._domainkey", 3, rsa4096_dkim),
+            ("opendkim._domainkey", 3, opendkim_expected),
+        ]
+        for selector, expected_chunk_count, expected_full in dkim_expectations:
+            with self.subTest(selector=selector):
+                ans = self.query_dns(selector, "TXT")
+                self.assertEqual(len(ans), 1, f"Expected a single TXT RR at {selector}")
+                rdata = ans[0]
+                self.assertEqual(
+                    len(rdata.strings),
+                    expected_chunk_count,
+                    f"Expected {expected_chunk_count} <character-string> chunk(s) for {selector}",
+                )
+                for chunk in rdata.strings:
+                    self.assertLessEqual(len(chunk), 255)
+                reassembled = b"".join(rdata.strings).decode("utf-8")
+                self.assertEqual(reassembled, expected_full)
+
+        # Also verify the 4096-bit DKIM record explicitly over TCP
+        tcp_ans = self.resolver.resolve(f"rsa4096._domainkey.{USER_ORIGIN}", "TXT", tcp=True)
+        self.assertEqual(b"".join(tcp_ans[0].strings).decode("utf-8"), rsa4096_dkim)
+
+        # 6. Verify two-record CNAME-delegated DKIM rotation selectors
+        c1_ans = self.query_dns("selector1._domainkey", "CNAME")
+        self.assertEqual(
+            str(c1_ans[0].target), "selector1-user._domainkey.mailprovider.example."
+        )
+        c2_ans = self.query_dns("selector2._domainkey", "CNAME")
+        self.assertEqual(
+            str(c2_ans[0].target), "selector2-user._domainkey.mailprovider.example."
+        )
+
+        # 7. Verify that an unsplit >255-byte single <character-string> is rejected by BIND named-checkzone
+        unsplit_bad_zone = (
+            base_zone
+            + "\n"
+            + mail_records
+            + f'\nunsplit._domainkey\t300\tIN\tTXT\t"{rsa2048_dkim}"\n'
+        )
+        bad_resp = self.put_zonefile(unsplit_bad_zone)
+        self.assertEqual(
+            bad_resp.status_code,
+            400,
+            "Expected unsplit >255-char single <character-string> to be rejected with HTTP 400",
+        )
+        # Active RSA-2048 DKIM record must remain intact after the rejected update
+        still_ok = self.query_dns("rsa2048._domainkey", "TXT")
+        self.assertEqual(b"".join(still_ok[0].strings).decode("utf-8"), rsa2048_dkim)
 
 
 if __name__ == "__main__":

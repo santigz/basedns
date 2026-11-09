@@ -309,4 +309,84 @@ describe('UI Record Creation, Deletion Protection, XSS & Error Handling (main.js
     assert.equal(errorFooter.classList.contains('d-none'), false);
     assert.match(errorSpan.textContent, /already taken/);
   });
+
+  it('creates and edits SPF, DMARC, long 2048-bit DKIM TXT records, and two-CNAME DKIM rotation records via UI forms', async () => {
+    const rsa2048Dkim =
+      'v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA' +
+      'M'.repeat(340) +
+      'IDAQAB';
+
+    // 1. Create SPF record at @
+    const spfForm = dom.createForm([
+      { id: 'txt-name', value: '@', classes: ['hostname-validation'] },
+      { id: 'txt-value', value: 'v=spf1 mx a -all', classes: ['txt-validation'] },
+      { id: 'txt-ttl', value: '300', classes: ['ttl-validation'] },
+    ]);
+    main.create_record_txt(spfForm.button);
+    await new Promise(r => setImmediate(r));
+
+    // 2. Create 2048-bit DKIM TXT record at default._domainkey
+    spfForm.inputs[0].value = 'default._domainkey';
+    spfForm.inputs[1].value = rsa2048Dkim;
+    spfForm.inputs[2].value = '300';
+    main.create_record_txt(spfForm.button);
+    await new Promise(r => setImmediate(r));
+
+    // 3. Create two CNAME-delegated DKIM selector records (selector1._domainkey and selector2._domainkey)
+    const cnameForm = dom.createForm([
+      { id: 'cname-name', value: 'selector1._domainkey', classes: ['cname-hostname-validation'] },
+      { id: 'cname-alias', value: 'selector1-user-example-com._domainkey.example.onmicrosoft.com.', classes: ['hostname-validation'] },
+      { id: 'cname-ttl', value: '300', classes: ['ttl-validation'] },
+    ]);
+    main.create_record_cname(cnameForm.button);
+    await new Promise(r => setImmediate(r));
+
+    cnameForm.inputs[0].value = 'selector2._domainkey';
+    cnameForm.inputs[1].value = 'selector2-user-example-com._domainkey.example.onmicrosoft.com.';
+    cnameForm.inputs[2].value = '300';
+    main.create_record_cname(cnameForm.button);
+    await new Promise(r => setImmediate(r));
+
+    // Verify generated zonefile has the 2048-bit DKIM record split into 2 quoted chunks and both CNAMEs
+    const reparsed = zonefile.parse(dom.zoneFileEl.textContent);
+    assert.equal(reparsed.txt.length, 2);
+    assert.equal(reparsed.txt[0].name, '@');
+    assert.equal(reparsed.txt[0].txt, '"v=spf1 mx a -all"');
+    assert.equal(reparsed.txt[1].name, 'default._domainkey');
+
+    const dkimChunks = zonefile.splitArgs(reparsed.txt[1].txt, null, true);
+    assert.equal(dkimChunks.length, 2);
+    assert.equal(dkimChunks.map(c => c.slice(1, -1)).join(''), rsa2048Dkim);
+
+    assert.equal(reparsed.cname.length, 2);
+    assert.equal(reparsed.cname[0].name, 'selector1._domainkey');
+    assert.equal(reparsed.cname[1].name, 'selector2._domainkey');
+
+    // Simulate reload from zonefile (where DKIM TXT is stored as 2 quoted chunks) and edit it via edit_rr()
+    main.set_zone(reparsed);
+    main.rebuild_zone_table();
+    const dkimRrId = main.get_zone().txt[1].id;
+    const editBtn = {
+      attributes: { rr_id: { nodeValue: String(dkimRrId) } },
+      closest: (sel) => (sel === 'tr' ? { querySelector: () => ({ innerText: 'TXT' }) } : null),
+    };
+    main.edit_rr(editBtn);
+    assert.equal(spfForm.inputs[0].value, 'default._domainkey');
+    assert.equal(spfForm.inputs[1].value, reparsed.txt[1].txt);
+
+    // Update the edited DKIM record with a new 4096-bit key (3 chunks)
+    const rsa4096Dkim =
+      'v=DKIM1; k=rsa; p=MIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKCAgEA' +
+      'N'.repeat(684) +
+      'IDAQAB';
+    spfForm.inputs[1].value = rsa4096Dkim;
+    main.create_record_txt(spfForm.button);
+    await new Promise(r => setImmediate(r));
+
+    const afterEdit = zonefile.parse(dom.zoneFileEl.textContent);
+    assert.equal(afterEdit.txt.length, 2, 'Editing must update the existing DKIM record in place');
+    const updatedChunks = zonefile.splitArgs(afterEdit.txt[1].txt, null, true);
+    assert.equal(updatedChunks.length, 3);
+    assert.equal(updatedChunks.map(c => c.slice(1, -1)).join(''), rsa4096Dkim);
+  });
 });
