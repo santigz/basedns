@@ -389,4 +389,133 @@ describe('UI Record Creation, Deletion Protection, XSS & Error Handling (main.js
     assert.equal(updatedChunks.length, 3);
     assert.equal(updatedChunks.map(c => c.slice(1, -1)).join(''), rsa4096Dkim);
   });
+
+  it('truncates record values longer than 50 characters with ... and show more/less toggle button', () => {
+    // 1. Strings <= 50 chars should be displayed directly without truncation or buttons
+    const shortText = 'v=spf1 mx -all';
+    assert.equal(main.format_record_value(shortText), 'v=spf1 mx -all');
+
+    const exact50Chars = 'a'.repeat(50);
+    assert.equal(main.format_record_value(exact50Chars), 'a'.repeat(50));
+
+    // 2. Strings > 50 chars should be truncated to 50 chars with ... and show more button
+    const long51Chars = 'b'.repeat(51);
+    const formatted51 = main.format_record_value(long51Chars);
+    assert.ok(formatted51.includes('record-value-container'));
+    assert.ok(formatted51.includes('<span>' + 'b'.repeat(50) + '</span>...'));
+    assert.ok(formatted51.includes('>show more</button>'));
+    assert.ok(formatted51.includes('<span>' + 'b'.repeat(51) + '</span>'));
+    assert.ok(formatted51.includes('>show less</button>'));
+    assert.ok(formatted51.includes('d-none'));
+
+    // 3. XSS prevention in both short preview and full view
+    const xssLong = '<script>' + 'x'.repeat(45) + '</script>';
+    const formattedXss = main.format_record_value(xssLong);
+    assert.ok(!formattedXss.includes('<script>'));
+    assert.ok(formattedXss.includes('&lt;script&gt;'));
+
+    // 4. Null / undefined / empty string handling
+    assert.equal(main.format_record_value(null), '');
+    assert.equal(main.format_record_value(undefined), '');
+    assert.equal(main.format_record_value(''), '');
+  });
+
+  it('toggle_record_value toggles between collapsed short view and full view', () => {
+    let focusedBtn = null;
+    const makeBtn = (label) => ({
+      focus: () => { focusedBtn = label; },
+    });
+    const shortBtn = makeBtn('show more');
+    const fullBtn = makeBtn('show less');
+
+    const shortClassList = new Set();
+    const fullClassList = new Set(['d-none']);
+
+    const shortEl = {
+      classList: {
+        contains: (c) => shortClassList.has(c),
+        add: (c) => shortClassList.add(c),
+        remove: (c) => shortClassList.delete(c),
+      },
+      querySelector: (sel) => (sel === '.record-toggle-btn' ? shortBtn : null),
+    };
+
+    const fullEl = {
+      classList: {
+        contains: (c) => fullClassList.has(c),
+        add: (c) => fullClassList.add(c),
+        remove: (c) => fullClassList.delete(c),
+      },
+      querySelector: (sel) => (sel === '.record-toggle-btn' ? fullBtn : null),
+    };
+
+    const container = {
+      querySelector: (sel) => {
+        if (sel === '.record-value-short') return shortEl;
+        if (sel === '.record-value-full') return fullEl;
+        return null;
+      },
+    };
+
+    const buttonInShort = {
+      closest: (sel) => (sel === '.record-value-container' ? container : null),
+    };
+    const buttonInFull = {
+      closest: (sel) => (sel === '.record-value-container' ? container : null),
+    };
+
+    // Initially short is visible, full is d-none
+    assert.equal(shortClassList.has('d-none'), false);
+    assert.equal(fullClassList.has('d-none'), true);
+
+    // Click 'show more' -> expands
+    main.toggle_record_value(buttonInShort);
+    assert.equal(shortClassList.has('d-none'), true, 'short view must have d-none added');
+    assert.equal(fullClassList.has('d-none'), false, 'full view must have d-none removed');
+    assert.equal(focusedBtn, 'show less', 'focus must move to show less button');
+
+    // Click 'show less' -> collapses
+    main.toggle_record_value(buttonInFull);
+    assert.equal(shortClassList.has('d-none'), false, 'short view must have d-none removed');
+    assert.equal(fullClassList.has('d-none'), true, 'full view must have d-none added');
+    assert.equal(focusedBtn, 'show more', 'focus must move to show more button');
+  });
+
+  it('renders long TXT records truncated in zone table and preserves full text on edit', () => {
+    const txtForm = dom.createForm([
+      { id: 'txt-name', value: '', classes: ['hostname-validation'] },
+      { id: 'txt-value', value: '', classes: ['txt-validation'] },
+      { id: 'txt-ttl', value: '', classes: ['ttl-validation'] },
+    ]);
+
+    const z = zonefile.parse(BASE_ZONE_TEXT);
+    const longTxt = 'v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQC3123456789012345678901234567890';
+    const shortTxt = 'v=spf1 -all';
+    z.txt = [
+      { name: 'default._domainkey', txt: longTxt },
+      { name: '@', txt: shortTxt },
+    ];
+    main.set_zone(z);
+    main.rebuild_zone_table();
+
+    // Table tbody should contain the truncated 50 chars of longTxt followed by ... and 'show more'
+    const truncatedPrefix = longTxt.slice(0, 50);
+    assert.ok(dom.tbody.innerHTML.includes(truncatedPrefix), 'Table must contain 50-char prefix');
+    assert.ok(dom.tbody.innerHTML.includes(`${truncatedPrefix}</span>...`), 'Table must display ... after 50 chars');
+    assert.ok(dom.tbody.innerHTML.includes('show more'), 'Table must contain "show more" button for long record');
+    assert.ok(dom.tbody.innerHTML.includes('show less'), 'Table must contain hidden "show less" button for long record');
+
+    // Short TXT record should NOT have show more button
+    assert.ok(dom.tbody.innerHTML.includes(shortTxt));
+    const shortRowMatch = dom.tbody.innerHTML.includes(`<span>${shortTxt}</span>...`);
+    assert.equal(shortRowMatch, false, 'Short record must not be truncated with ...');
+
+    // Edit the long TXT record and verify full text is populated into the form
+    const editBtn = {
+      attributes: { rr_id: { nodeValue: String(z.txt[0].id) } },
+      closest: (sel) => (sel === 'tr' ? { querySelector: () => ({ innerText: 'TXT' }) } : null),
+    };
+    main.edit_rr(editBtn);
+    assert.equal(txtForm.inputs[1].value, longTxt, 'Editing must load the full un-truncated TXT into the form');
+  });
 });

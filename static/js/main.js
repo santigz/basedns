@@ -72,6 +72,70 @@ function ttl_html(ttl, zone_ttl) {
   }
 }
 
+/**
+  * Formats a record's value string. If the value length exceeds maxLength (default: 50),
+  * truncates the initial view to maxLength characters followed by '...' and a 'show more'
+  * button, paired with a hidden full view and a 'show less' button.
+  *
+  * @param {string|any} value - Content of the record.
+  * @param {number} [maxLength=50] - Maximum characters to show when collapsed.
+  * @returns {string} HTML code for the value display.
+  */
+function format_record_value(value, maxLength = 50) {
+  if (value === undefined || value === null) {
+    return '';
+  }
+  const str = String(value);
+  if (str.length <= maxLength) {
+    return escape_html(str);
+  }
+  const short_text = str.slice(0, maxLength);
+  const short_html = escape_html(short_text);
+  const full_html = escape_html(str);
+
+  return `<span class="record-value-container">` +
+    `<span class="record-value-short">` +
+      `<span>${short_html}</span>...` +
+      `<button type="button" class="btn btn-sm btn-link p-0 ms-1 align-baseline text-decoration-none record-toggle-btn" onclick="toggle_record_value(this)" aria-expanded="false">show more</button>` +
+    `</span>` +
+    `<span class="record-value-full d-none">` +
+      `<span>${full_html}</span>` +
+      `<button type="button" class="btn btn-sm btn-link p-0 ms-1 align-baseline text-decoration-none record-toggle-btn" onclick="toggle_record_value(this)" aria-expanded="true">show less</button>` +
+    `</span>` +
+  `</span>`;
+}
+
+/**
+  * Toggles the collapsed / expanded state of a truncated record value.
+  *
+  * @param {HTMLElement} button - The button clicked ('show more' or 'show less').
+  */
+function toggle_record_value(button) {
+  if (!button) return;
+  const container = button.closest ? button.closest('.record-value-container') : null;
+  if (!container) return;
+  const shortEl = container.querySelector('.record-value-short');
+  const fullEl = container.querySelector('.record-value-full');
+  if (!shortEl || !fullEl) return;
+
+  const isShortHidden = shortEl.classList.contains('d-none');
+  if (isShortHidden) {
+    shortEl.classList.remove('d-none');
+    fullEl.classList.add('d-none');
+    const toggleBtn = shortEl.querySelector('.record-toggle-btn');
+    if (toggleBtn && typeof toggleBtn.focus === 'function') {
+      toggleBtn.focus();
+    }
+  } else {
+    shortEl.classList.add('d-none');
+    fullEl.classList.remove('d-none');
+    const toggleBtn = fullEl.querySelector('.record-toggle-btn');
+    if (toggleBtn && typeof toggleBtn.focus === 'function') {
+      toggleBtn.focus();
+    }
+  }
+}
+
 const EDITABLE_RECORD_TYPES = new Set(['a', 'aaaa', 'cname', 'mx', 'txt', 'ns', 'srv', 'caa']);
 
 /**
@@ -319,7 +383,7 @@ function rebuild_zone_table() {
       const is_default_at = !('name' in rr);
       const rr_name = is_default_at ? '@' : rr['name'];
       const deletable = is_rr_deletable('ns', rr, zone.soa);
-      const host_display = escape_html(safe_to_unicode(rr['host'] || ''));
+      const host_display = format_record_value(safe_to_unicode(rr['host'] || ''));
       rows_html += zone_table_row('NS', rr_name, host_display, rr['ttl'], zone_ttl, rr.id, deletable, is_default_at);
     }
   }
@@ -327,26 +391,26 @@ function rebuild_zone_table() {
     for (const rr of zone['a']) {
       rr.id = rr_id++;
       const deletable = is_rr_deletable('a', rr, zone.soa);
-      rows_html += zone_table_row('A', rr['name'], escape_html(rr['ip'] ?? ''), rr['ttl'], zone_ttl, rr.id, deletable);
+      rows_html += zone_table_row('A', rr['name'], format_record_value(rr['ip'] ?? ''), rr['ttl'], zone_ttl, rr.id, deletable);
     }
   }
   if ('aaaa' in zone) {
     for (const rr of zone['aaaa']) {
       rr.id = rr_id++;
-      rows_html += zone_table_row('AAAA', rr['name'], escape_html(rr['ip'] ?? ''), rr['ttl'], zone_ttl, rr.id, true);
+      rows_html += zone_table_row('AAAA', rr['name'], format_record_value(rr['ip'] ?? ''), rr['ttl'], zone_ttl, rr.id, true);
     }
   }
   if ('cname' in zone) {
     for (const rr of zone['cname']) {
       rr.id = rr_id++;
-      const alias_display = escape_html(safe_to_unicode(rr['alias'] || ''));
+      const alias_display = format_record_value(safe_to_unicode(rr['alias'] || ''));
       rows_html += zone_table_row('CNAME', rr['name'], alias_display, rr['ttl'], zone_ttl, rr.id);
     }
   }
   if ('mx' in zone) {
     for (const rr of zone['mx']) {
       rr.id = rr_id++;
-      const host_display = escape_html(safe_to_unicode(rr['host'] || ''));
+      const host_display = format_record_value(safe_to_unicode(rr['host'] || ''));
       const value = `<span class="badge text-bg-secondary">${escape_html(rr['preference'] ?? '')}</span> ${host_display}`;
       rows_html += zone_table_row('MX', rr['name'], value, rr['ttl'], zone_ttl, rr.id);
     }
@@ -354,39 +418,39 @@ function rebuild_zone_table() {
   if ('txt' in zone) {
     for (const rr of zone['txt']) {
       rr.id = rr_id++;
-      rows_html += zone_table_row('TXT', rr['name'], escape_html(rr['txt'] ?? ''), rr['ttl'], zone_ttl, rr.id);
+      rows_html += zone_table_row('TXT', rr['name'], format_record_value(rr['txt'] ?? ''), rr['ttl'], zone_ttl, rr.id);
     }
   }
   if ('srv' in zone) {
     for (const rr of zone['srv']) {
       rr.id = rr_id++;
-      const value = `<span class="badge text-bg-secondary">${escape_html(rr['priority'] ?? '')} ${escape_html(rr['weight'] ?? '')} ${escape_html(rr['port'] ?? '')}</span> ${escape_html(safe_to_unicode(rr['target'] || ''))}`;
+      const value = `<span class="badge text-bg-secondary">${escape_html(rr['priority'] ?? '')} ${escape_html(rr['weight'] ?? '')} ${escape_html(rr['port'] ?? '')}</span> ${format_record_value(safe_to_unicode(rr['target'] || ''))}`;
       rows_html += zone_table_row('SRV', rr['name'], value, rr['ttl'], zone_ttl, rr.id);
     }
   }
   if ('caa' in zone) {
     for (const rr of zone['caa']) {
       rr.id = rr_id++;
-      const value = `<span class="badge text-bg-secondary">${escape_html(rr['flags'] ?? 0)} ${escape_html(rr['tag'] ?? '')}</span> ${escape_html(rr['value'] ?? '')}`;
+      const value = `<span class="badge text-bg-secondary">${escape_html(rr['flags'] ?? 0)} ${escape_html(rr['tag'] ?? '')}</span> ${format_record_value(rr['value'] ?? '')}`;
       rows_html += zone_table_row('CAA', rr['name'], value, rr['ttl'], zone_ttl, rr.id);
     }
   }
   if ('ptr' in zone) {
     for (const rr of zone['ptr']) {
       rr.id = rr_id++;
-      rows_html += zone_table_row('PTR', rr['name'], escape_html(safe_to_unicode(rr['host'] || '')), rr['ttl'], zone_ttl, rr.id);
+      rows_html += zone_table_row('PTR', rr['name'], format_record_value(safe_to_unicode(rr['host'] || '')), rr['ttl'], zone_ttl, rr.id);
     }
   }
   if ('spf' in zone) {
     for (const rr of zone['spf']) {
       rr.id = rr_id++;
-      rows_html += zone_table_row('SPF', rr['name'], escape_html(rr['data'] ?? ''), rr['ttl'], zone_ttl, rr.id);
+      rows_html += zone_table_row('SPF', rr['name'], format_record_value(rr['data'] ?? ''), rr['ttl'], zone_ttl, rr.id);
     }
   }
   if ('ds' in zone) {
     for (const rr of zone['ds']) {
       rr.id = rr_id++;
-      const value = `${escape_html(rr['key_tag'] ?? '')} ${escape_html(rr['algorithm'] ?? '')} ${escape_html(rr['digest_type'] ?? '')} ${escape_html(rr['digest'] ?? '')}`;
+      const value = `${escape_html(rr['key_tag'] ?? '')} ${escape_html(rr['algorithm'] ?? '')} ${escape_html(rr['digest_type'] ?? '')} ${format_record_value(rr['digest'] ?? '')}`;
       rows_html += zone_table_row('DS', rr['name'], value, rr['ttl'], zone_ttl, rr.id);
     }
   }
@@ -1358,6 +1422,7 @@ if (typeof window !== 'undefined') {
     reset_zone,
     change_origin,
     logout,
+    toggle_record_value,
   });
 }
 
@@ -1378,6 +1443,8 @@ export {
   safe_to_unicode,
   safe_to_ascii,
   ttl_html,
+  format_record_value,
+  toggle_record_value,
   zone_table_row,
   update_soa_summary,
   fix_ttl_placeholder,

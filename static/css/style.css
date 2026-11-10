@@ -36,3 +36,17 @@
 tr.editing-record-row {
   background-color: var(--bs-warning-bg-subtle) !important;
 }
+
+.record-toggle-btn {
+  font-size: 0.82rem;
+  font-family: var(--bs-body-font-family);
+  vertical-align: baseline;
+  text-decoration: none;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.record-toggle-btn:hover {
+  text-decoration: underline;
+}
+

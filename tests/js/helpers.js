@@ -118,6 +118,8 @@ export async function loadDnsModules(customDom = null) {
         safe_to_unicode: typeof safe_to_unicode !== 'undefined' ? safe_to_unicode : undefined,
         safe_to_ascii: typeof safe_to_ascii !== 'undefined' ? safe_to_ascii : undefined,
         ttl_html: typeof ttl_html !== 'undefined' ? ttl_html : undefined,
+        format_record_value: typeof format_record_value !== 'undefined' ? format_record_value : undefined,
+        toggle_record_value: typeof toggle_record_value !== 'undefined' ? toggle_record_value : undefined,
         zone_table_row: typeof zone_table_row !== 'undefined' ? zone_table_row : undefined,
         fix_ttl_placeholder: typeof fix_ttl_placeholder !== 'undefined' ? fix_ttl_placeholder : undefined,
         current_date_id: typeof current_date_id !== 'undefined' ? current_date_id : undefined,
