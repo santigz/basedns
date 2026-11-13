@@ -78,11 +78,11 @@ class TestOriginManagement(unittest.TestCase):
         self.assertTrue((self.user_zones_dir / "alice").is_file())
         self.assertEqual(self.zm.find_user_zones(), {"alice": "alice"})
 
-        # 2. Change origin to 'myproject' -> file becomes 'alice@myproject', old 'alice' removed
+        # 2. Change origin to 'myproject' -> file becomes 'alice:myproject', old 'alice' removed
         new_zone = self.zm.change_user_origin("alice", "myproject")
         self.assertIn("$ORIGIN myproject.example.com.", new_zone)
         self.assertFalse((self.user_zones_dir / "alice").exists())
-        self.assertTrue((self.user_zones_dir / "alice@myproject").is_file())
+        self.assertTrue((self.user_zones_dir / "alice:myproject").is_file())
         self.assertEqual(self.zm.find_user_zones(), {"alice": "myproject"})
         self.assertEqual(self.zm.user_zone_origin("alice"), "myproject.example.com.")
 
@@ -90,14 +90,14 @@ class TestOriginManagement(unittest.TestCase):
         reverted_zone = self.zm.change_user_origin("alice", "alice")
         self.assertIn("$ORIGIN alice.example.com.", reverted_zone)
         self.assertTrue((self.user_zones_dir / "alice").is_file())
-        self.assertFalse((self.user_zones_dir / "alice@myproject").exists())
+        self.assertFalse((self.user_zones_dir / "alice:myproject").exists())
         self.assertEqual(self.zm.find_user_zones(), {"alice": "alice"})
 
     def test_02_temp_orig_and_hidden_files_ignored(self):
         """Verify .tmp, .orig, and hidden dotfiles in USER_ZONES_DIR are ignored."""
         self.zm.get_user_zonefile("alice")
         (self.user_zones_dir / "alice.tmp").write_text("temp")
-        (self.user_zones_dir / "alice@custom.orig").write_text("orig")
+        (self.user_zones_dir / "alice:custom.orig").write_text("orig")
         (self.user_zones_dir / ".hidden").write_text("hidden")
 
         self.assertEqual(self.zm.find_user_zones(), {"alice": "alice"})
@@ -106,23 +106,23 @@ class TestOriginManagement(unittest.TestCase):
     def test_03_new_user_default_subdomain_taken_gets_numeric_suffix(self):
         """
         If 'alice' claims 'bob' as her subdomain before 'bob' ever logs in,
-        then when 'bob' logs in for the first time, 'bob' gets 'bob-1' (file 'bob@bob-1').
+        then when 'bob' logs in for the first time, 'bob' gets 'bob-1' (file 'bob:bob-1').
         If 'bob-1' is also taken, 'bob' gets 'bob-2'.
         """
         self.zm.get_user_zonefile("alice")
         self.zm.change_user_origin("alice", "bob")
-        self.assertTrue((self.user_zones_dir / "alice@bob").is_file())
+        self.assertTrue((self.user_zones_dir / "alice:bob").is_file())
 
         # Another user 'charlie' also takes 'bob-1'
         self.zm.get_user_zonefile("charlie")
         self.zm.change_user_origin("charlie", "bob-1")
-        self.assertTrue((self.user_zones_dir / "charlie@bob-1").is_file())
+        self.assertTrue((self.user_zones_dir / "charlie:bob-1").is_file())
 
         # Now 'bob' logs in for the first time
         self.assertEqual(self.zm.user_zone_origin("bob"), "bob-2.example.com.")
         bob_zone = self.zm.get_user_zonefile("bob")
         self.assertIn("$ORIGIN bob-2.example.com.", bob_zone)
-        self.assertTrue((self.user_zones_dir / "bob@bob-2").is_file())
+        self.assertTrue((self.user_zones_dir / "bob:bob-2").is_file())
         self.assertEqual(
             self.zm.find_user_zones(),
             {"alice": "bob", "bob": "bob-2", "charlie": "bob-1"},
@@ -130,13 +130,13 @@ class TestOriginManagement(unittest.TestCase):
 
     def test_04_new_user_with_reserved_or_long_username_gets_safe_subdomain(self):
         """
-        A new user named 'ns' (reserved by main-zone) automatically lands on 'ns-1' ('ns@ns-1').
+        A new user named 'ns' (reserved by main-zone) automatically lands on 'ns-1' ('ns:ns-1').
         A 63-character username that collides truncates safely to stay <= 63 characters.
         """
         # 1. Reserved username 'ns'
         ns_zone = self.zm.get_user_zonefile("ns")
         self.assertIn("$ORIGIN ns-1.example.com.", ns_zone)
-        self.assertTrue((self.user_zones_dir / "ns@ns-1").is_file())
+        self.assertTrue((self.user_zones_dir / "ns:ns-1").is_file())
 
         # 2. 63-char username collision
         long_name = "a" * 63
@@ -237,14 +237,14 @@ class TestOriginManagement(unittest.TestCase):
 
         named_local = self.named_conf_local_file.read_text()
         self.assertIn('zone "wonderland.example.com."', named_local)
-        self.assertIn('file "/etc/bind/user-zones/alice@wonderland";', named_local)
+        self.assertIn('file "/etc/bind/user-zones/alice:wonderland";', named_local)
         self.assertNotIn('zone "alice.example.com."', named_local)
         self.assertIn('zone "bob.example.com."', named_local)
         self.assertIn('file "/etc/bind/user-zones/bob";', named_local)
 
         # 'alice' is now free for 'bob' to claim!
         self.zm.change_user_origin("bob", "alice")
-        self.assertTrue((self.user_zones_dir / "bob@alice").is_file())
+        self.assertTrue((self.user_zones_dir / "bob:alice").is_file())
 
     def test_08_reset_and_full_reset_preserve_custom_origin_and_dyndns_works(self):
         """
@@ -254,20 +254,20 @@ class TestOriginManagement(unittest.TestCase):
         self.zm.get_user_zonefile("alice")
         self.zm.change_user_origin("alice", "custom")
 
-        # 1. DynDNS update_a_record writes to alice@custom
+        # 1. DynDNS update_a_record writes to alice:custom
         self.zm.update_a_record("alice", "home", "198.51.100.77")
-        zone_file_path = self.user_zones_dir / "alice@custom"
+        zone_file_path = self.user_zones_dir / "alice:custom"
         self.assertTrue(zone_file_path.is_file())
         self.assertFalse((self.user_zones_dir / "alice").exists())
         self.assertIn("home\tIN\tA\t198.51.100.77", zone_file_path.read_text())
 
-        # 2. Normal reset_user_zonefile wipes custom records but preserves 'alice@custom'
+        # 2. Normal reset_user_zonefile wipes custom records but preserves 'alice:custom'
         reset_text = self.zm.reset_user_zonefile("alice")
         self.assertIn("$ORIGIN custom.example.com.", reset_text)
         self.assertNotIn("198.51.100.77", zone_file_path.read_text())
         self.assertTrue(zone_file_path.is_file())
 
-        # 3. full_reset / reset_all_user_zonefiles preserves 'alice@custom'
+        # 3. full_reset / reset_all_user_zonefiles preserves 'alice:custom'
         self.zm.reset_all_user_zonefiles()
         self.assertTrue(zone_file_path.is_file())
         self.assertEqual(self.zm.find_user_zones(), {"alice": "custom"})
@@ -289,9 +289,9 @@ class TestOriginManagement(unittest.TestCase):
             with self.assertRaises(NamedCheckZoneError):
                 self.zm.change_user_origin("alice", "broken")
 
-        # Verify rollback restored 'alice' file with 'keepme' record and removed 'alice@broken'
+        # Verify rollback restored 'alice' file with 'keepme' record and removed 'alice:broken'
         self.assertTrue((self.user_zones_dir / "alice").is_file())
-        self.assertFalse((self.user_zones_dir / "alice@broken").exists())
+        self.assertFalse((self.user_zones_dir / "alice:broken").exists())
         self.assertIn("keepme\tIN\tA\t192.0.2.99", self.zm.get_user_zonefile("alice"))
         self.assertEqual(self.zm.user_zone_origin("alice"), "alice.example.com.")
 

@@ -15,7 +15,6 @@ services:
       - ROOT_DOMAIN=example.com.
       - WEBSITE_URL=http://localhost:8053
       - TESTING_MODE=true
-      # - REMOVE_USER_DOMAIN=true
     volumes:
       - .:/code
       - basedns-bind:/etc/bind

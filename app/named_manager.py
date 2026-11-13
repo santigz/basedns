@@ -56,7 +56,7 @@ class NamedManager(object):
         - msg: message in case of error
         '''
         proc = subprocess.run(['named-checkconf'], 
-                              timeout=5,
+                              timeout=15,
                               stdout=subprocess.PIPE, 
                               stderr=subprocess.STDOUT,
                               text=True)
@@ -67,9 +67,10 @@ class NamedManager(object):
 
     @classmethod
     def named_checkzone(cls, origin, zone_file) -> str:
-        # named-checkzone -k fail ensures zone names are strictly checked
-        proc = subprocess.run(['named-checkzone', '-k', 'fail', origin, zone_file], 
-                              timeout=5,
+        # named-checkzone -k fail ensures zone names are strictly checked;
+        # -i local avoids live external DNS lookups for out-of-zone NS/MX/SRV targets.
+        proc = subprocess.run(['named-checkzone', '-i', 'local', '-k', 'fail', origin, zone_file], 
+                              timeout=15,
                               stdout=subprocess.PIPE, 
                               stderr=subprocess.STDOUT,
                               text=True)

@@ -155,8 +155,7 @@
                   <div class="mb-3">
                     <label for="new-origin-input" class="form-label">New zone origin</label>
                     <div class="input-group has-validation">
-                      <input type="text" class="form-control font-monospace" id="new-origin-input"
-                        placeholder="Enter new subdomain (e.g. myproject)" required>
+                      <input type="text" class="form-control font-monospace" id="new-origin-input" placeholder="Enter new subdomain" required>
                       <span class="input-group-text font-monospace" id="new-origin-root-suffix">.{{ user_origin.split('.', 1)[1] if '.' in user_origin else root_domain }}</span>
                       <div class="invalid-feedback" id="new-origin-feedback">
                         Must be a valid single-label DNS subdomain.
@@ -178,8 +177,7 @@
                   </div>
                 </form>
               </div>
-              <div class="modal-footer bg-danger-subtle d-none" id="change-origin-error-footer">Error changing the zone origin.<br><span
-                  id="change-origin-error-msg"></span></div>
+              <div class="modal-footer bg-danger-subtle d-none" id="change-origin-error-footer">Error changing the zone origin.<br><span id="change-origin-error-msg"></span></div>
             </div>
           </div>
         </div>

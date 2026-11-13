@@ -151,16 +151,18 @@ class ZoneManager(object):
     #     except dns.exception.DNSException as e:
     #         logger.error(f"Error reading zone file: {e}")
 
+    USER_ZONE_SEP = ':'
+
     @staticmethod
     def user_zone_filename(username: str, subdomain: str) -> str:
         if username == subdomain:
             return username
-        return f'{username}@{subdomain}'
+        return f'{username}{ZoneManager.USER_ZONE_SEP}{subdomain}'
 
     @staticmethod
     def parse_zone_filename(filename: str) -> tuple[str, str]:
-        if '@' in filename:
-            username, subdomain = filename.rsplit('@', 1)
+        if ZoneManager.USER_ZONE_SEP in filename:
+            username, subdomain = filename.rsplit(ZoneManager.USER_ZONE_SEP, 1)
             return username, subdomain
         return filename, filename
 
@@ -384,7 +386,7 @@ class ZoneManager(object):
         if subdomain is None:
             subdomain = self.get_user_subdomain(username)
         zonefile = Path(USER_ZONES_DIR) / self.user_zone_filename(username, subdomain)
-        zonefile_backup = zonefile.with_suffix('.orig')
+        zonefile_backup = zonefile.with_name(zonefile.name + '.orig')
         prev_mtime_ns = zonefile.stat().st_mtime_ns if zonefile.exists() else None
         if zonefile.exists():
             shutil.copy2(zonefile, zonefile_backup)
@@ -691,10 +693,9 @@ class ZoneManager(object):
         for f_name in Path(USER_TOKENS_DIR).iterdir():
             try:
                 if f_name.is_file():
-                    username = f_name.stem
-                    status = f_name.suffix.lstrip('.')
-                    if status != 'inactive':
-                        tokens[username]= f_name.read_text()
+                    if f_name.name.endswith('.inactive'):
+                        continue
+                    tokens[f_name.name] = f_name.read_text()
             except:
                 continue
         return tokens

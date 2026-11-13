@@ -27,7 +27,6 @@ class Settings(BaseSettings):
     website_url: str = "http://localhost"
     testing_mode: bool = False
     testing_user: str = 'user'
-    remove_user_domain: bool = True
     logout_url: str = ""
 
 
@@ -61,10 +60,6 @@ api_key_header = APIKeyHeader(name="x-api-key", auto_error=False)
 
 def check_user(request):
     username = request.headers.get('remote-user')
-    if username and settings.remove_user_domain:
-        # If the username is user@example.com, just leave user
-        # TODO: there are no tests for this
-        username = username.split('@', 1)[0]
     if not username and settings.testing_mode:
         username = settings.testing_user
     if not username:
