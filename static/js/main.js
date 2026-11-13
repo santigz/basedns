@@ -1152,10 +1152,6 @@ function domain_sanitizer(domain) {
   return domain.replace(/\s+/g, '');
 }
 
-function logout() {
-  window.location.href = 'https://auth.infor.tiernogalvan.es/logout?rd=https://dns.infor.tiernogalvan.es';
-}
-
 
 function fqdn(hostname) {
   const origin = document.querySelector('meta[name="user-origin"]').content;
@@ -1430,7 +1426,6 @@ if (typeof window !== 'undefined') {
     copy_text_value,
     reset_zone,
     change_origin,
-    logout,
     toggle_record_value,
   });
 }
@@ -1498,7 +1493,6 @@ export {
   set_input_validations,
   delete_rr,
   domain_sanitizer,
-  logout,
   fqdn,
   copy_fqdn,
   copy_text_value,

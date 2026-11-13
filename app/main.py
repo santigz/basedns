@@ -1,5 +1,6 @@
 import json
 import logging
+from urllib.parse import quote, unquote
 
 from fastapi import FastAPI, APIRouter, Request, HTTPException, status, Security, Query
 from fastapi.responses import HTMLResponse, PlainTextResponse, JSONResponse
@@ -7,7 +8,7 @@ from fastapi.security import APIKeyHeader, APIKeyQuery
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import Optional
 
 from .dns_manager import (
@@ -20,11 +21,25 @@ from .dns_manager import (
 
 
 class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+
     root_domain: str = "example.com."
     website_url: str = "http://localhost"
     testing_mode: bool = False
     testing_user: str = 'user'
     remove_user_domain: bool = True
+    logout_url: str = ""
+
+
+def encode_logout_url(url: str) -> str:
+    """Encode the redirect target in LOGOUT_URL safely for use in a link."""
+    url = (url or "").strip()
+    if not url:
+        return ""
+    if "?rd=" in url:
+        base, rd = url.split("?rd=", 1)
+        return f"{base}?rd={quote(unquote(rd), safe='')}"
+    return url
 
 
 logger = logging.getLogger(__name__)
@@ -82,6 +97,7 @@ async def read_app(request: Request):
             "user_token": zonemgr.get_user_token(username),
             "website_url": settings.website_url,
             "app_prefix": APP_PREFIX,
+            "logout_url": encode_logout_url(settings.logout_url),
           }
     return templates.TemplateResponse(request=request, name="html/user.html", context=ctx)
 
