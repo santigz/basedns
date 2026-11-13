@@ -268,10 +268,11 @@ class ZoneManager(object):
         return True
 
     def sanitize_default_subdomain(self, username: str) -> str:
+        local_part = str(username).split('@', 1)[0]
         try:
-            return self.validate_subdomain(username)
+            return self.validate_subdomain(local_part)
         except InvalidSubdomainError:
-            cleaned = re.sub(r'[^a-z0-9-]+', '-', str(username).lower()).strip('-')
+            cleaned = re.sub(r'[^a-z0-9-]+', '-', local_part.lower()).strip('-')
             cleaned = cleaned[:63].rstrip('-')
             return cleaned or 'user'
 

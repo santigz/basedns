@@ -66,16 +66,17 @@ class TestUserDomainCollision(unittest.TestCase):
 
             resp_alice = client.get(f"{main_mod.APP_PREFIX}/zonefile", headers=alice_headers)
             self.assertEqual(resp_alice.status_code, 200)
+            self.assertIn("$ORIGIN user.example.com.", resp_alice.text)
 
             resp_bob = client.get(f"{main_mod.APP_PREFIX}/zonefile", headers=bob_headers)
             self.assertEqual(resp_bob.status_code, 200)
+            self.assertIn("$ORIGIN user-1.example.com.", resp_bob.text)
 
             # Both users must have distinct zone files and distinct origins
             user_zones = self.zm.find_user_zones()
             self.assertEqual(
-                len(user_zones),
-                2,
-                f"Expected 2 separate user zones for user@alice.com and user@bob.com, got: {user_zones}",
+                user_zones,
+                {"user@alice.com": "user", "user@bob.com": "user-1"},
             )
 
             zone_files = [p.name for p in self.user_zones_dir.iterdir() if p.is_file()]
