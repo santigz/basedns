@@ -2,6 +2,15 @@ import { toASCII, toUnicode } from './punycode.min.js?v=2';
 import { generate, parse } from './zonefile.js?v=2';
 
 /**
+  * @type {string} URL prefix for all login-required backend routes.
+  */
+const APP_PREFIX = (
+  typeof document !== 'undefined'
+    ? document.querySelector('meta[name="app-prefix"]')?.content
+    : undefined
+) ?? '/app';
+
+/**
   * @type {string} Stores the origin name for this user's zone.
   *                Obtained from the html code.
   */
@@ -260,7 +269,7 @@ function next_soa_serial(current_serial) {
 
 function update_zonefile(zone_text) {
   return new Promise((resolve, reject) => {
-    fetch('/zonefile', {
+    fetch(`${APP_PREFIX}/zonefile`, {
       method: 'PUT',
       headers: {
         'Content-Type': 'text/plain',
@@ -1216,7 +1225,7 @@ function download_zonefile() {
 
 
 function reset_zone() {
-  fetch('/reset_zonefile', {
+  fetch(`${APP_PREFIX}/reset_zonefile`, {
     method: 'POST',
   })
     .then(response => {
@@ -1363,7 +1372,7 @@ function change_origin() {
   const subdomain = input ? safe_to_ascii(input.value.trim()).toLowerCase() : '';
   if (submitBtn) submitBtn.disabled = true;
 
-  return fetch('/origin', {
+  return fetch(`${APP_PREFIX}/origin`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

@@ -288,7 +288,7 @@ describe('UI Record Creation, Deletion Protection, XSS & Error Handling (main.js
     };
 
     await main.change_origin();
-    assert.equal(capturedReq.url, '/origin');
+    assert.equal(capturedReq.url, '/app/origin');
     assert.equal(capturedReq.opts.method, 'POST');
     assert.deepEqual(JSON.parse(capturedReq.opts.body), {
       subdomain: 'myzone',

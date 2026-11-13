@@ -310,35 +310,35 @@ class TestOriginManagement(unittest.TestCase):
                 alice_headers = {"Remote-User": "alice"}
                 bob_headers = {"Remote-User": "bob"}
 
-                r_alice = client.get("/", headers=alice_headers)
+                r_alice = client.get(f"{main_mod.APP_PREFIX}", headers=alice_headers)
                 self.assertEqual(r_alice.status_code, 200)
                 self.assertIn("alice.example.com.", r_alice.text)
 
-                r_bob = client.get("/", headers=bob_headers)
+                r_bob = client.get(f"{main_mod.APP_PREFIX}", headers=bob_headers)
                 self.assertEqual(r_bob.status_code, 200)
 
                 avail = client.get(
-                    "/origin/available", params={"subdomain": "fresh"}, headers=alice_headers
+                    f"{main_mod.APP_PREFIX}/origin/available", params={"subdomain": "fresh"}, headers=alice_headers
                 ).json()
                 self.assertEqual(avail["available"], True)
                 self.assertEqual(avail["valid"], True)
                 self.assertEqual(avail["origin"], "fresh.example.com.")
 
                 taken = client.get(
-                    "/origin/available", params={"subdomain": "bob"}, headers=alice_headers
+                    f"{main_mod.APP_PREFIX}/origin/available", params={"subdomain": "bob"}, headers=alice_headers
                 ).json()
                 self.assertEqual(taken["available"], False)
                 self.assertEqual(taken["valid"], True)
                 self.assertIn("already taken", taken["reason"])
 
                 invalid = client.get(
-                    "/origin/available", params={"subdomain": "bad.sub"}, headers=alice_headers
+                    f"{main_mod.APP_PREFIX}/origin/available", params={"subdomain": "bad.sub"}, headers=alice_headers
                 ).json()
                 self.assertEqual(invalid["available"], False)
                 self.assertEqual(invalid["valid"], False)
 
                 no_ack = client.post(
-                    "/origin",
+                    f"{main_mod.APP_PREFIX}/origin",
                     json={"subdomain": "fresh", "acknowledge": False},
                     headers=alice_headers,
                 )
@@ -346,7 +346,7 @@ class TestOriginManagement(unittest.TestCase):
                 self.assertEqual(no_ack.json()["detail"]["error"], "Acknowledgement required")
 
                 ok_resp = client.post(
-                    "/origin",
+                    f"{main_mod.APP_PREFIX}/origin",
                     json={"subdomain": "fresh", "acknowledge": True},
                     headers=alice_headers,
                 )
@@ -357,7 +357,7 @@ class TestOriginManagement(unittest.TestCase):
                 self.assertIn("$ORIGIN fresh.example.com.", data["zone"])
 
                 conflict_resp = client.post(
-                    "/origin",
+                    f"{main_mod.APP_PREFIX}/origin",
                     json={"subdomain": "fresh", "acknowledge": True},
                     headers=bob_headers,
                 )

@@ -579,7 +579,7 @@ class ZoneManager(object):
         ]
         for url in urls:
             try:
-                response = requests.get(url)
+                response = requests.get(url, timeout=5)
                 if response.status_code == 200:
                     logger.info(f'Found public IP {response.text} from {url}')
                     ip = response.text.strip()

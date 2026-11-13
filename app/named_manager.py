@@ -28,7 +28,7 @@ class NamedManager(object):
     @classmethod
     def reload(cls) -> str:
         proc = subprocess.run(['rndc', 'reload'],
-                              timeout=5,
+                              timeout=15,
                               stdout=subprocess.PIPE, 
                               stderr=subprocess.STDOUT,
                               text=True)

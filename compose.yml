@@ -1,12 +1,11 @@
-
 services:
 
-  dns-platform:
-    container_name: dns-platform
+  basedns:
+    container_name: basedns
     build:
       context: .
       dockerfile: Dockerfile
-    image: dns-platform
+    image: basedns
     ports:
       - 8053:80
       - 5053:53/udp
@@ -18,9 +17,39 @@ services:
       - TESTING_MODE=true
     volumes:
       - .:/code
-      - dns-platform-bind:/etc/bind
-      - dns-platform-bind-backups:/etc/bind-backups
+      - basedns-bind:/etc/bind
+      - basedns-bind-backups:/etc/bind-backups
+
+  tests:
+    profiles: ["test"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: basedns
+    volumes:
+      - .:/code
+    working_dir: /code
+    environment:
+      - TZ=UTC
+      - ROOT_DOMAIN=example.com.
+      - TESTING_MODE=true
+    command: >
+      bash -c "fastapi run app/main.py --proxy-headers --port 80 &
+      SERVER_PID=$$!;
+      trap 'kill $$SERVER_PID 2>/dev/null || true' EXIT;
+      until python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:80/')\" 2>/dev/null; do
+        sleep 0.5;
+      done;
+      python -m unittest discover tests -v"
+
+  js-tests:
+    profiles: ["test"]
+    image: node:22-alpine
+    volumes:
+      - .:/code
+    working_dir: /code
+    command: node --test tests/js/*.test.js
 
 volumes:
-  dns-platform-bind:
-  dns-platform-bind-backups:
+  basedns-bind:
+  basedns-bind-backups:

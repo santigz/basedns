@@ -1,4 +1,4 @@
-# dns-platform
+# basedns
 
 A lightweight self-hosted DNS platform and authoritative DNS management interface built on top of FastAPI and BIND 9.
 
@@ -14,13 +14,13 @@ To start the production service with persisted BIND configurations and backups:
 docker compose up -d --build
 ```
 
-This starts the container named `dns-platform` exposing:
+This starts the container named `basedns` exposing:
 - **Web UI & API:** Port `8053` (`http://localhost:8053`)
 - **DNS Server (BIND9):** Port `5053` (TCP/UDP)
 
 Persisted named volumes defined in `compose.yml`:
-- `dns-platform-bind`: mounted at `/etc/bind`
-- `dns-platform-bind-backups`: mounted at `/etc/bind-backups`
+- `basedns-bind`: mounted at `/etc/bind`
+- `basedns-bind-backups`: mounted at `/etc/bind-backups`
 
 To view container logs:
 ```bash
@@ -40,35 +40,19 @@ The project includes both **Python integration/security tests** (testing FastAPI
 
 ### 1. Python Integration & Security Tests
 
-Integration and security tests (`tests/test_integration.py`) interact directly with the FastAPI server on port 80 and BIND 9 on port 53.
+Integration and security tests (`tests/test_integration.py`, `tests/test_origin_management.py`) interact with the FastAPI server on port 80 and BIND 9 on port 53.
 
-#### Run in an Isolated Ephemeral Container
-
-To run the Python test suite in a separate, isolated container without interfering with or mutating your production container data:
+To run the Python test suite in an ephemeral, isolated container without touching the production `basedns` container or its volumes:
 
 ```bash
-docker run --rm \
-  -v "$(pwd)":/code \
-  -e ROOT_DOMAIN=example.com. \
-  -e TESTING_MODE=true \
-  dns-platform \
-  bash -c "fastapi run app/main.py --proxy-headers --port 80 & sleep 3 && python -m unittest discover tests -v"
+docker compose --profile test run --rm tests
 ```
 
 This command:
-1. Spawns an ephemeral test container (`--rm`).
-2. Mounts the project root to `/code`.
-3. Does **not** mount the production volumes (`/etc/bind` and `/etc/bind-backups`), ensuring test execution is completely sandboxed.
-4. Boots up FastAPI and BIND in the background.
-5. Executes `tests/test_integration.py`, covering zone operations, record updates, backup archive creation, and BIND 9 security hardening checks (recursion prevention, AXFR refusal, RFC 2136 refusal, and CHAOS query suppression).
-
-#### Run Inside an Already Running Container
-
-If you already have a running development container (`TESTING_MODE=true`) and wish to execute the Python test suite against it:
-
-```bash
-docker exec -it dns-platform python -m unittest discover tests -v
-```
+1. Uses the `test` profile so `docker compose up -d` never starts test services in production.
+2. Spawns an ephemeral container (`--rm`) with test-only environment variables (`ROOT_DOMAIN=example.com.`, `TESTING_MODE=true`).
+3. Mounts the project root to `/code` **without** mounting the production volumes (`/etc/bind` and `/etc/bind-backups`).
+4. Starts FastAPI and BIND inside the container, waits until the HTTP server responds on port 80, and runs `python -m unittest discover tests -v`.
 
 ### 2. JavaScript Unit Tests
 
@@ -77,9 +61,7 @@ The frontend and zonefile generation tests (`tests/js/*.test.js`) use Node.js's 
 #### Run Against Current Code
 
 ```bash
-npm test
-# or directly with Node.js (v18+):
-node --test tests/js/*.test.js
+docker compose --profile test run --rm js-tests
 ```
 
 #### Run Against a Previous Git Commit
@@ -87,9 +69,9 @@ node --test tests/js/*.test.js
 To run the current JavaScript test suite against the JS code from an earlier git commit (e.g. to verify regression fixes without modifying your working tree):
 
 ```bash
-GIT_COMMIT=8d2a299 npm test
+docker compose --profile test run --rm -e GIT_COMMIT=8d2a299 js-tests
 # or using a relative ref:
-GIT_COMMIT=HEAD~1 node --test tests/js/*.test.js
+docker compose --profile test run --rm -e GIT_COMMIT=HEAD~1 js-tests
 ```
 
 ---

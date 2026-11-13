@@ -1,7 +1,7 @@
 import json
 import logging
 
-from fastapi import FastAPI, Request, HTTPException, status, Security, Query
+from fastapi import FastAPI, APIRouter, Request, HTTPException, status, Security, Query
 from fastapi.responses import HTMLResponse, PlainTextResponse, JSONResponse
 from fastapi.security import APIKeyHeader, APIKeyQuery
 from fastapi.staticfiles import StaticFiles
@@ -29,8 +29,11 @@ class Settings(BaseSettings):
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.DEBUG)
 
+APP_PREFIX = "/app"
+
 settings = Settings()
 app = FastAPI()
+app_router = APIRouter(prefix=APP_PREFIX)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 templates = Jinja2Templates(directory="templates/")
@@ -51,14 +54,16 @@ def check_user(request):
 
 @app.get('/', response_class=HTMLResponse)
 async def read_root(request: Request):
-    username = request.headers.get('remote-user')
-    if not username and settings.testing_mode:
-        username = settings.testing_user
-    if not username:
-        ctx = {
-                "username": username,
-              }
-        return templates.TemplateResponse(request=request, name="html/index.html", context=ctx)
+    return templates.TemplateResponse(
+        request=request,
+        name="html/index.html",
+        context={"app_prefix": APP_PREFIX},
+    )
+
+
+@app_router.get('', response_class=HTMLResponse)
+async def read_app(request: Request):
+    username = check_user(request)
     user_zone = zonemgr.get_user_zonefile(username)
     user_origin = zonemgr.user_zone_origin(username)
     user_subdomain = zonemgr.get_user_subdomain(username)
@@ -71,11 +76,12 @@ async def read_root(request: Request):
             "testing_mode": settings.testing_mode,
             "user_token": zonemgr.get_user_token(username),
             "website_url": settings.website_url,
+            "app_prefix": APP_PREFIX,
           }
     return templates.TemplateResponse(request=request, name="html/user.html", context=ctx)
 
 
-@app.get('/headers')
+@app_router.get('/headers')
 async def read_headers(request: Request):
     check_user(request)
     # TODO: check user belongs to group dns_admin
@@ -84,7 +90,7 @@ async def read_headers(request: Request):
 
 
 
-@app.get('/zonefile', response_class=PlainTextResponse)
+@app_router.get('/zonefile', response_class=PlainTextResponse)
 def read_user_zone(request: Request):
     username = check_user(request)
     try:
@@ -94,7 +100,7 @@ def read_user_zone(request: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.put('/zonefile')
+@app_router.put('/zonefile')
 async def set_user_zone(request: Request):
     username = check_user(request)
     try:
@@ -112,7 +118,7 @@ async def set_user_zone(request: Request):
         raise HTTPException(status_code=500, detail={'error': 'Internal error', 'message': str(e)})
 
 
-@app.post('/reset_zonefile', response_class=PlainTextResponse)
+@app_router.post('/reset_zonefile', response_class=PlainTextResponse)
 def reset_zone(request: Request):
     username = check_user(request)
     try:
@@ -121,7 +127,7 @@ def reset_zone(request: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get('/origin/available')
+@app_router.get('/origin/available')
 def check_origin_available(
     request: Request,
     subdomain: str = Query(..., description="Candidate subdomain label"),
@@ -172,7 +178,7 @@ def check_origin_available(
     }
 
 
-@app.post('/origin')
+@app_router.post('/origin')
 async def change_origin(request: Request):
     username = check_user(request)
     raw_body = await request.body()
@@ -276,3 +282,6 @@ async def update_dns(
 async def dyndns_install_script(request: Request):
     ctx = {"website_url": settings.website_url}
     return templates.TemplateResponse(request=request, name='dyndns_install.sh.j2', context=ctx)
+
+
+app.include_router(app_router)

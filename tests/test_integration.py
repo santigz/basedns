@@ -21,6 +21,12 @@ HOST = "127.0.0.1"
 HTTP_PORT = 80
 DNS_PORT = 53
 BASE_URL = f"http://{HOST}:{HTTP_PORT}"
+APP_PREFIX = "/app"
+APP_URL = f"{BASE_URL}{APP_PREFIX}"
+
+# Timeouts to wait for requests. Modify if your machine is really slow.
+REQUEST_TIMEOUT = 30
+DNS_TIMEOUT = 5.0
 
 TEST_USER = "user"
 ROOT_DOMAIN = os.getenv("ROOT_DOMAIN", "example.com.")
@@ -41,8 +47,8 @@ class TestDNSPlatformIntegration(unittest.TestCase):
         cls.resolver = dns.resolver.Resolver(configure=False)
         cls.resolver.nameservers = [HOST]
         cls.resolver.port = DNS_PORT
-        cls.resolver.timeout = 3.0
-        cls.resolver.lifetime = 3.0
+        cls.resolver.timeout = DNS_TIMEOUT
+        cls.resolver.lifetime = DNS_TIMEOUT
 
         # Snapshot existing user-zones and backups so running inside a live dev container
         # does not clobber developer state or leave temporary test users behind.
@@ -61,20 +67,20 @@ class TestDNSPlatformIntegration(unittest.TestCase):
         )
 
         # Ensure the user zone is initialized by hitting '/'
-        resp = requests.get(f"{BASE_URL}/", headers=cls.headers, timeout=5)
+        resp = requests.get(f"{APP_URL}", headers=cls.headers, timeout=REQUEST_TIMEOUT)
         if resp.status_code != 200:
             raise RuntimeError(
-                f"Failed to reach web app at {BASE_URL}/ (status {resp.status_code})"
+                f"Failed to reach web app at {APP_URL} (status {resp.status_code})"
             )
 
         # If 'user' had a custom origin in a running dev container (e.g. user@santi),
         # switch 'user' back to default 'user.example.com.' for the test run.
         if f'content="{USER_ORIGIN}"' not in resp.text:
             requests.post(
-                f"{BASE_URL}/origin",
+                f"{APP_URL}/origin",
                 json={"subdomain": TEST_USER, "acknowledge": True},
                 headers=cls.headers,
-                timeout=5,
+                timeout=REQUEST_TIMEOUT,
             )
 
         # Extract the user's API token from the rendered HTML page for DynDNS tests
@@ -84,7 +90,7 @@ class TestDNSPlatformIntegration(unittest.TestCase):
     def setUp(self):
         # Start each test with a clean default zone for 'user'
         resp = requests.post(
-            f"{BASE_URL}/reset_zonefile", headers=self.headers, timeout=5
+            f"{APP_URL}/reset_zonefile", headers=self.headers, timeout=REQUEST_TIMEOUT
         )
         self.assertEqual(resp.status_code, 200, f"Reset failed: {resp.text}")
 
@@ -103,9 +109,9 @@ class TestDNSPlatformIntegration(unittest.TestCase):
                 zm.reset_main_zone()
                 zm.reset_named_conf_local()
             except Exception:
-                requests.post(f"{BASE_URL}/reset_zonefile", headers=cls.headers, timeout=5)
+                requests.post(f"{APP_URL}/reset_zonefile", headers=cls.headers, timeout=REQUEST_TIMEOUT)
         else:
-            requests.post(f"{BASE_URL}/reset_zonefile", headers=cls.headers, timeout=5)
+            requests.post(f"{APP_URL}/reset_zonefile", headers=cls.headers, timeout=REQUEST_TIMEOUT)
 
         backups_dir = Path(BACKUPS_DIR)
         if backups_dir.exists():
@@ -125,7 +131,7 @@ class TestDNSPlatformIntegration(unittest.TestCase):
 
     def get_zonefile(self, headers=None) -> str:
         resp = requests.get(
-            f"{BASE_URL}/zonefile", headers=headers or self.headers, timeout=5
+            f"{APP_URL}/zonefile", headers=headers or self.headers, timeout=REQUEST_TIMEOUT
         )
         self.assertEqual(resp.status_code, 200)
         return resp.text
@@ -133,10 +139,10 @@ class TestDNSPlatformIntegration(unittest.TestCase):
     def put_zonefile(self, content: str, headers=None) -> requests.Response:
         req_headers = {**(headers or self.headers), "Content-Type": "text/plain"}
         return requests.put(
-            f"{BASE_URL}/zonefile",
+            f"{APP_URL}/zonefile",
             data=content.encode("utf-8"),
             headers=req_headers,
-            timeout=5,
+            timeout=REQUEST_TIMEOUT,
         )
 
     def test_01_default_zone_soa_and_ns(self):
@@ -219,7 +225,7 @@ class TestDNSPlatformIntegration(unittest.TestCase):
         resp1 = requests.post(
             f"{BASE_URL}/update/home",
             params={"api_key": self.api_token, "ip": "198.51.100.10"},
-            timeout=5,
+            timeout=REQUEST_TIMEOUT,
         )
         self.assertEqual(resp1.status_code, 200, f"DynDNS create failed: {resp1.text}")
         self.assertEqual(resp1.json()["ip"], "198.51.100.10")
@@ -232,7 +238,7 @@ class TestDNSPlatformIntegration(unittest.TestCase):
             f"{BASE_URL}/update/home",
             params={"ip": "198.51.100.99"},
             headers={"X-API-Key": self.api_token},
-            timeout=5,
+            timeout=REQUEST_TIMEOUT,
         )
         self.assertEqual(resp2.status_code, 200, f"DynDNS update failed: {resp2.text}")
         self.assertEqual(resp2.json()["ip"], "198.51.100.99")
@@ -253,7 +259,7 @@ class TestDNSPlatformIntegration(unittest.TestCase):
 
         # Reset the zone
         reset_resp = requests.post(
-            f"{BASE_URL}/reset_zonefile", headers=self.headers, timeout=5
+            f"{APP_URL}/reset_zonefile", headers=self.headers, timeout=REQUEST_TIMEOUT
         )
         self.assertEqual(reset_resp.status_code, 200)
 
@@ -268,7 +274,7 @@ class TestDNSPlatformIntegration(unittest.TestCase):
         new_headers = {"Remote-User": new_user}
 
         # Access '/' as the new user to trigger zone creation and BIND config reload
-        resp = requests.get(f"{BASE_URL}/", headers=new_headers, timeout=5)
+        resp = requests.get(f"{APP_URL}", headers=new_headers, timeout=REQUEST_TIMEOUT)
         self.assertEqual(resp.status_code, 200)
         self.assertIn(new_origin, resp.text)
 
@@ -327,7 +333,7 @@ class TestDNSPlatformIntegration(unittest.TestCase):
         for external_domain in ("google.com.", "example.org."):
             query = dns.message.make_query(external_domain, dns.rdatatype.A)
             query.flags |= dns.flags.RD
-            resp = dns.query.udp(query, HOST, port=DNS_PORT, timeout=3.0)
+            resp = dns.query.udp(query, HOST, port=DNS_PORT, timeout=DNS_TIMEOUT)
             self.assertEqual(
                 resp.rcode(),
                 dns.rcode.REFUSED,
@@ -341,7 +347,7 @@ class TestDNSPlatformIntegration(unittest.TestCase):
         # Also check that authoritative responses have RA=0
         auth_query = dns.message.make_query(USER_ORIGIN, dns.rdatatype.SOA)
         auth_query.flags |= dns.flags.RD
-        auth_resp = dns.query.udp(auth_query, HOST, port=DNS_PORT, timeout=3.0)
+        auth_resp = dns.query.udp(auth_query, HOST, port=DNS_PORT, timeout=DNS_TIMEOUT)
         self.assertEqual(auth_resp.rcode(), dns.rcode.NOERROR)
         self.assertFalse(
             bool(auth_resp.flags & dns.flags.RA),
@@ -352,7 +358,7 @@ class TestDNSPlatformIntegration(unittest.TestCase):
         """Verify that unauthorized AXFR zone transfers are refused for both root and user zones."""
         for zone_origin in (ROOT_DOMAIN, USER_ORIGIN):
             axfr_query = dns.message.make_query(zone_origin, dns.rdatatype.AXFR)
-            axfr_resp = dns.query.tcp(axfr_query, HOST, port=DNS_PORT, timeout=3.0)
+            axfr_resp = dns.query.tcp(axfr_query, HOST, port=DNS_PORT, timeout=DNS_TIMEOUT)
             self.assertEqual(
                 axfr_resp.rcode(),
                 dns.rcode.REFUSED,
@@ -364,7 +370,7 @@ class TestDNSPlatformIntegration(unittest.TestCase):
         """Verify that direct RFC 2136 DNS UPDATE packets are refused and cannot modify zones."""
         update_msg = dns.update.UpdateMessage(USER_ORIGIN)
         update_msg.add("injected", 300, "A", "198.51.100.250")
-        resp = dns.query.udp(update_msg, HOST, port=DNS_PORT, timeout=3.0)
+        resp = dns.query.udp(update_msg, HOST, port=DNS_PORT, timeout=DNS_TIMEOUT)
         self.assertEqual(
             resp.rcode(),
             dns.rcode.REFUSED,
@@ -379,7 +385,7 @@ class TestDNSPlatformIntegration(unittest.TestCase):
             query = dns.message.make_query(
                 qname, dns.rdatatype.TXT, dns.rdataclass.CH
             )
-            resp = dns.query.udp(query, HOST, port=DNS_PORT, timeout=3.0)
+            resp = dns.query.udp(query, HOST, port=DNS_PORT, timeout=DNS_TIMEOUT)
             self.assertEqual(
                 len(resp.answer),
                 0,
@@ -396,7 +402,7 @@ class TestDNSPlatformIntegration(unittest.TestCase):
         u_headers = {"Remote-User": u_name}
 
         # 1. Initialize user and add a custom A record
-        r_init = requests.get(f"{BASE_URL}/", headers=u_headers, timeout=5)
+        r_init = requests.get(f"{APP_URL}", headers=u_headers, timeout=REQUEST_TIMEOUT)
         self.assertEqual(r_init.status_code, 200)
         z_data = self.get_zonefile(headers=u_headers)
         self.assertEqual(
@@ -412,19 +418,19 @@ class TestDNSPlatformIntegration(unittest.TestCase):
 
         # 2. Unacknowledged origin change must be rejected with 400
         no_ack = requests.post(
-            f"{BASE_URL}/origin",
+            f"{APP_URL}/origin",
             json={"subdomain": custom_sub, "acknowledge": False},
             headers=u_headers,
-            timeout=5,
+            timeout=REQUEST_TIMEOUT,
         )
         self.assertEqual(no_ack.status_code, 400)
 
         # 3. Change origin with acknowledge=True
         change_resp = requests.post(
-            f"{BASE_URL}/origin",
+            f"{APP_URL}/origin",
             json={"subdomain": custom_sub, "acknowledge": True},
             headers=u_headers,
-            timeout=5,
+            timeout=REQUEST_TIMEOUT,
         )
         self.assertEqual(change_resp.status_code, 200, f"Origin change failed: {change_resp.text}")
         self.assertEqual(change_resp.json()["origin"], custom_origin)
@@ -438,10 +444,10 @@ class TestDNSPlatformIntegration(unittest.TestCase):
 
         # 5. Rejects reserved 'ns' and already-taken subdomain with 409
         res_ns = requests.post(
-            f"{BASE_URL}/origin",
+            f"{APP_URL}/origin",
             json={"subdomain": "ns", "acknowledge": True},
             headers=u_headers,
-            timeout=5,
+            timeout=REQUEST_TIMEOUT,
         )
         self.assertEqual(res_ns.status_code, 409)
 
@@ -450,7 +456,7 @@ class TestDNSPlatformIntegration(unittest.TestCase):
         user_b = f"seconduser-{ts}"
         user_b_origin = f"{user_b}.{ROOT_DOMAIN}"
         b_headers = {"Remote-User": user_b}
-        requests.get(f"{BASE_URL}/", headers=b_headers, timeout=5)
+        requests.get(f"{APP_URL}", headers=b_headers, timeout=REQUEST_TIMEOUT)
         b_zone = self.get_zonefile(headers=b_headers)
         self.assertEqual(
             self.put_zonefile(
@@ -459,10 +465,10 @@ class TestDNSPlatformIntegration(unittest.TestCase):
             200,
         )
         b_conflict = requests.post(
-            f"{BASE_URL}/origin",
+            f"{APP_URL}/origin",
             json={"subdomain": custom_sub.upper(), "acknowledge": True},
             headers=b_headers,
-            timeout=5,
+            timeout=REQUEST_TIMEOUT,
         )
         self.assertEqual(b_conflict.status_code, 409)
         self.assertEqual(
@@ -473,18 +479,18 @@ class TestDNSPlatformIntegration(unittest.TestCase):
         # 7. User A changes to a third name, freeing custom_sub -> User B can now claim custom_sub!
         third_sub = f"third-{ts}"
         a_move = requests.post(
-            f"{BASE_URL}/origin",
+            f"{APP_URL}/origin",
             json={"subdomain": third_sub, "acknowledge": True},
             headers=u_headers,
-            timeout=5,
+            timeout=REQUEST_TIMEOUT,
         )
         self.assertEqual(a_move.status_code, 200)
 
         b_claim = requests.post(
-            f"{BASE_URL}/origin",
+            f"{APP_URL}/origin",
             json={"subdomain": custom_sub, "acknowledge": True},
             headers=b_headers,
-            timeout=5,
+            timeout=REQUEST_TIMEOUT,
         )
         self.assertEqual(b_claim.status_code, 200)
         self.assertEqual(b_claim.json()["origin"], custom_origin)
@@ -511,17 +517,17 @@ class TestDNSPlatformIntegration(unittest.TestCase):
         d_headers = {"Remote-User": user_d}
 
         # 1. User A initializes and changes origin to user_c before user_c ever logs in
-        requests.get(f"{BASE_URL}/", headers=a_headers, timeout=5)
+        requests.get(f"{APP_URL}", headers=a_headers, timeout=REQUEST_TIMEOUT)
         c_resp = requests.post(
-            f"{BASE_URL}/origin",
+            f"{APP_URL}/origin",
             json={"subdomain": user_c, "acknowledge": True},
             headers=a_headers,
-            timeout=5,
+            timeout=REQUEST_TIMEOUT,
         )
         self.assertEqual(c_resp.status_code, 200)
 
         # 2. Now user_c logs in for the first time -> lands on userc-<ts>-1
-        t_resp = requests.get(f"{BASE_URL}/", headers=c_headers, timeout=5)
+        t_resp = requests.get(f"{APP_URL}", headers=c_headers, timeout=REQUEST_TIMEOUT)
         self.assertEqual(t_resp.status_code, 200)
         expected_c_fallback = f"{user_c}-1.{ROOT_DOMAIN}"
         self.assertIn(expected_c_fallback, t_resp.text)
@@ -534,26 +540,26 @@ class TestDNSPlatformIntegration(unittest.TestCase):
         self.assertEqual(str(soa_fallback[0].mname), f"ns.{expected_c_fallback}")
 
         # 4. User A claims user_d AND User B claims user_d-1 before user_d logs in -> user_d gets user_d-2
-        requests.get(f"{BASE_URL}/", headers=b_headers, timeout=5)
+        requests.get(f"{APP_URL}", headers=b_headers, timeout=REQUEST_TIMEOUT)
         self.assertEqual(
             requests.post(
-                f"{BASE_URL}/origin",
+                f"{APP_URL}/origin",
                 json={"subdomain": user_d, "acknowledge": True},
                 headers=a_headers,
-                timeout=5,
+                timeout=REQUEST_TIMEOUT,
             ).status_code,
             200,
         )
         self.assertEqual(
             requests.post(
-                f"{BASE_URL}/origin",
+                f"{APP_URL}/origin",
                 json={"subdomain": f"{user_d}-1", "acknowledge": True},
                 headers=b_headers,
-                timeout=5,
+                timeout=REQUEST_TIMEOUT,
             ).status_code,
             200,
         )
-        d_resp = requests.get(f"{BASE_URL}/", headers=d_headers, timeout=5)
+        d_resp = requests.get(f"{APP_URL}", headers=d_headers, timeout=REQUEST_TIMEOUT)
         self.assertEqual(d_resp.status_code, 200)
         expected_d_fallback = f"{user_d}-2.{ROOT_DOMAIN}"
         self.assertIn(expected_d_fallback, d_resp.text)
@@ -562,10 +568,10 @@ class TestDNSPlatformIntegration(unittest.TestCase):
 
         # 5. Since User A moved from user_c to user_d, user_c can now reclaim their own name 'user_c'!
         reclaim_resp = requests.post(
-            f"{BASE_URL}/origin",
+            f"{APP_URL}/origin",
             json={"subdomain": user_c, "acknowledge": True},
             headers=c_headers,
-            timeout=5,
+            timeout=REQUEST_TIMEOUT,
         )
         self.assertEqual(reclaim_resp.status_code, 200)
         self.assertEqual(reclaim_resp.json()["origin"], f"{user_c}.{ROOT_DOMAIN}")
