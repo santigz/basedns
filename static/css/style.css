@@ -7,20 +7,12 @@
   margin-left: 8px;
   cursor: pointer;
   font-size: 0.8rem;
-  transition: opacity 0.15s ease-in-out;
   user-select: none;
 }
 
 .copy-fqdn:hover .copy-fqdn-hint,
-.copy-fqdn:focus-within .copy-fqdn-hint,
-.copy-fqdn-hint:focus {
+.copy-fqdn-hint:focus-visible {
   opacity: 1;
-}
-
-@media (hover: none) {
-  .copy-fqdn-hint {
-    opacity: 1;
-  }
 }
 
 .row-action-btn {
