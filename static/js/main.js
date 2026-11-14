@@ -1413,7 +1413,9 @@ var admin_users_cache = [];
 var admin_users_loaded = false;
 var admin_backups_loaded = false;
 var admin_zone_cache = new Map();
-var pending_delete_username = null;
+var admin_delete_mode = false;
+var admin_selected_users = new Set();
+var pending_delete_users = [];
 
 /**
   * Filters admin user objects by username (case-insensitive substring match).
@@ -1453,6 +1455,8 @@ function render_admin_users(users, container) {
     statusEl.textContent = `Showing ${users.length} user${users.length === 1 ? '' : 's'}`;
   }
 
+  const currentUsername = get_current_username();
+
   for (const user of users) {
     const item = document.createElement('div');
     item.className = 'list-group-item p-0';
@@ -1460,31 +1464,33 @@ function render_admin_users(users, container) {
     const rowHeader = document.createElement('div');
     rowHeader.className = 'd-flex align-items-center';
 
+    const canSelect = admin_delete_mode && user.username !== currentUsername;
+    let checkbox = null;
+    if (canSelect) {
+      checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.className = 'form-check-input rounded-circle ms-3 me-1 flex-shrink-0';
+      checkbox.setAttribute('aria-label', `Select ${user.username}`);
+      checkbox.checked = admin_selected_users.has(user.username);
+      if (checkbox.checked) {
+        item.classList.add('bg-danger-subtle');
+      }
+      rowHeader.appendChild(checkbox);
+    }
+
     const headerBtn = document.createElement('button');
     headerBtn.type = 'button';
-    headerBtn.className = 'btn btn-link text-decoration-none text-body flex-grow-1 d-flex justify-content-between align-items-center px-3 py-2 text-start';
+    headerBtn.className = 'btn btn-link text-decoration-none text-body flex-grow-1 d-flex flex-column flex-sm-row justify-content-between align-items-start align-items-sm-center gap-1 gap-sm-2 px-3 py-2 text-start';
+    headerBtn.style.minWidth = '0';
     headerBtn.setAttribute('aria-expanded', 'false');
     headerBtn.innerHTML =
-      `<span>` +
-        `<strong class="font-monospace">${escape_html(user.username)}</strong>` +
-        `<span class="text-body-secondary ms-2 small">alias: <code>${escape_html(user.alias)}</code></span>` +
-      `</span>` +
-      `<span class="badge text-bg-secondary rounded-pill">${escape_html(user.record_count)} record${user.record_count === 1 ? '' : 's'}</span>`;
-
-    const currentUsername = get_current_username();
+      `<div class="mw-100" style="min-width: 0;">` +
+        `<strong class="font-monospace text-break d-block d-sm-inline">${escape_html(user.username)}</strong>` +
+        `<span class="text-body-secondary small d-block d-sm-inline ms-sm-2 text-break">alias: <code>${escape_html(user.alias)}</code></span>` +
+      `</div>` +
+      `<span class="text-body-secondary small text-nowrap">${escape_html(user.record_count)} record${user.record_count === 1 ? '' : 's'}</span>`;
 
     rowHeader.appendChild(headerBtn);
-    if (user.username !== currentUsername) {
-      const deleteBtn = document.createElement('button');
-      deleteBtn.type = 'button';
-      deleteBtn.className = 'btn btn-sm btn-outline-danger me-3 flex-shrink-0';
-      deleteBtn.setAttribute('aria-label', `Delete ${user.username}`);
-      deleteBtn.innerHTML = '<i class="bi bi-trash"></i>';
-      deleteBtn.addEventListener('click', () => {
-        prompt_delete_admin_user(user.username);
-      });
-      rowHeader.appendChild(deleteBtn);
-    }
 
     const zoneWrapper = document.createElement('div');
     zoneWrapper.className = 'd-none border-top bg-body-tertiary p-3';
@@ -1494,9 +1500,31 @@ function render_admin_users(users, container) {
     zonePre.style.whiteSpace = 'pre-wrap';
     zoneWrapper.appendChild(zonePre);
 
-    headerBtn.addEventListener('click', () => {
-      toggle_admin_user_zone(user.username, headerBtn, zoneWrapper, zonePre);
-    });
+    if (admin_delete_mode) {
+      if (canSelect && checkbox) {
+        const applySelection = (selected) => {
+          checkbox.checked = selected;
+          if (selected) {
+            admin_selected_users.add(user.username);
+            item.classList.add('bg-danger-subtle');
+          } else {
+            admin_selected_users.delete(user.username);
+            item.classList.remove('bg-danger-subtle');
+          }
+          update_admin_delete_controls();
+        };
+        checkbox.addEventListener('change', () => {
+          applySelection(checkbox.checked);
+        });
+        headerBtn.addEventListener('click', () => {
+          applySelection(!admin_selected_users.has(user.username));
+        });
+      }
+    } else {
+      headerBtn.addEventListener('click', () => {
+        toggle_admin_user_zone(user.username, headerBtn, zoneWrapper, zonePre);
+      });
+    }
 
     item.appendChild(rowHeader);
     item.appendChild(zoneWrapper);
@@ -1605,12 +1633,66 @@ async function load_admin_backups() {
   }
 }
 
-function prompt_delete_admin_user(username) {
-  if (username === get_current_username()) return;
-  pending_delete_username = username;
+function update_admin_delete_controls() {
+  const modeBtn = document.getElementById('admin-delete-mode-btn');
+  const deleteBtn = document.getElementById('admin-delete-users-btn');
+  if (modeBtn) {
+    if (!admin_delete_mode) {
+      modeBtn.className = 'btn btn-sm btn-link text-danger text-decoration-none';
+      modeBtn.innerHTML = '<i class="bi bi-trash me-1"></i>Delete users';
+    } else {
+      modeBtn.className = 'btn btn-sm btn-link text-secondary text-decoration-none';
+      modeBtn.innerHTML = '<i class="bi bi-x-lg me-1"></i>Exit user deletion';
+    }
+  }
+  if (deleteBtn) {
+    if (!admin_delete_mode) {
+      deleteBtn.classList.add('d-none');
+      deleteBtn.disabled = true;
+      deleteBtn.textContent = 'Select users to delete';
+    } else {
+      deleteBtn.classList.remove('d-none');
+      if (admin_selected_users.size === 0) {
+        deleteBtn.disabled = true;
+        deleteBtn.textContent = 'Select users to delete';
+      } else {
+        deleteBtn.disabled = false;
+        deleteBtn.textContent = 'Delete selected users';
+      }
+    }
+  }
+}
+
+function rerender_filtered_admin_users() {
+  const searchInput = document.getElementById('admin-user-search');
+  const query = searchInput ? searchInput.value : '';
+  const container = document.getElementById('admin-users-list');
+  render_admin_users(filter_admin_users(admin_users_cache, query), container);
+}
+
+function enter_admin_delete_mode() {
+  admin_delete_mode = true;
+  admin_selected_users.clear();
+  update_admin_delete_controls();
+  rerender_filtered_admin_users();
+}
+
+function exit_admin_delete_mode() {
+  admin_delete_mode = false;
+  admin_selected_users.clear();
+  update_admin_delete_controls();
+  rerender_filtered_admin_users();
+}
+
+function prompt_delete_selected_admin_users() {
+  const currentUsername = get_current_username();
+  const targets = Array.from(admin_selected_users).filter(u => u !== currentUsername);
+  if (targets.length === 0) return;
+
+  pending_delete_users = targets;
   const usernameEl = document.getElementById('admin-delete-toast-username');
   if (usernameEl) {
-    usernameEl.textContent = username;
+    usernameEl.textContent = targets.join(', ');
   }
   const errorEl = document.getElementById('admin-delete-toast-error');
   if (errorEl) {
@@ -1632,7 +1714,7 @@ function prompt_delete_admin_user(username) {
 }
 
 function hide_delete_admin_user_toast() {
-  pending_delete_username = null;
+  pending_delete_users = [];
   const toastEl = document.getElementById('admin-delete-user-toast');
   if (toastEl) {
     if (typeof bootstrap !== 'undefined' && bootstrap.Toast) {
@@ -1644,8 +1726,8 @@ function hide_delete_admin_user_toast() {
 }
 
 async function confirm_delete_admin_user() {
-  const username = pending_delete_username;
-  if (!username) return;
+  const targets = [...pending_delete_users];
+  if (targets.length === 0) return;
 
   const confirmBtn = document.getElementById('admin-delete-toast-confirm');
   const errorEl = document.getElementById('admin-delete-toast-error');
@@ -1657,36 +1739,50 @@ async function confirm_delete_admin_user() {
     errorEl.classList.add('d-none');
   }
 
-  try {
-    const response = await fetch(`${APP_PREFIX}/admin/users/${encodeURIComponent(username)}`, {
-      method: 'DELETE',
-    });
-    if (!response.ok) {
-      let msg = `HTTP ${response.status}`;
-      try {
-        const data = await response.json();
-        if (data && data.detail) {
-          msg = typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail);
+  const deleted = new Set();
+  const failures = [];
+  for (const username of targets) {
+    try {
+      const response = await fetch(`${APP_PREFIX}/admin/users/${encodeURIComponent(username)}`, {
+        method: 'DELETE',
+      });
+      if (!response.ok) {
+        let msg = `HTTP ${response.status}`;
+        try {
+          const data = await response.json();
+          if (data && data.detail) {
+            msg = typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail);
+          }
+        } catch {
+          // Ignore JSON parse failure
         }
-      } catch {
-        // Ignore JSON parse failure
+        throw new Error(msg);
       }
-      throw new Error(msg);
+      deleted.add(username);
+    } catch (err) {
+      failures.push(`${username}: ${err.message}`);
     }
+  }
 
-    admin_users_cache = admin_users_cache.filter(u => u.username !== username);
-    admin_zone_cache.delete(username);
-    const searchInput = document.getElementById('admin-user-search');
-    const query = searchInput ? searchInput.value : '';
-    const container = document.getElementById('admin-users-list');
-    render_admin_users(filter_admin_users(admin_users_cache, query), container);
+  if (deleted.size > 0) {
+    admin_users_cache = admin_users_cache.filter(u => !deleted.has(u.username));
+    for (const u of deleted) {
+      admin_zone_cache.delete(u);
+      admin_selected_users.delete(u);
+    }
+  }
+
+  if (failures.length === 0) {
+    exit_admin_delete_mode();
     hide_delete_admin_user_toast();
-  } catch (err) {
+  } else {
+    update_admin_delete_controls();
+    rerender_filtered_admin_users();
     if (confirmBtn) {
       confirmBtn.disabled = false;
     }
     if (errorEl) {
-      errorEl.textContent = `Failed to delete user: ${err.message}`;
+      errorEl.textContent = `Failed to delete: ${failures.join('; ')}`;
       errorEl.classList.remove('d-none');
     }
   }
@@ -1697,7 +1793,9 @@ function reset_admin_state() {
   admin_users_loaded = false;
   admin_backups_loaded = false;
   admin_zone_cache = new Map();
-  pending_delete_username = null;
+  admin_delete_mode = false;
+  admin_selected_users = new Set();
+  pending_delete_users = [];
 }
 
 function init_admin_panel() {
@@ -1726,8 +1824,27 @@ function init_admin_panel() {
   const searchInput = document.getElementById('admin-user-search');
   if (searchInput) {
     searchInput.addEventListener('input', () => {
-      const container = document.getElementById('admin-users-list');
-      render_admin_users(filter_admin_users(admin_users_cache, searchInput.value), container);
+      rerender_filtered_admin_users();
+    });
+  }
+
+  const deleteModeBtn = document.getElementById('admin-delete-mode-btn');
+  if (deleteModeBtn) {
+    deleteModeBtn.addEventListener('click', () => {
+      if (!admin_delete_mode) {
+        enter_admin_delete_mode();
+      } else {
+        exit_admin_delete_mode();
+      }
+    });
+  }
+
+  const deleteUsersBtn = document.getElementById('admin-delete-users-btn');
+  if (deleteUsersBtn) {
+    deleteUsersBtn.addEventListener('click', () => {
+      if (admin_delete_mode && admin_selected_users.size > 0) {
+        prompt_delete_selected_admin_users();
+      }
     });
   }
 
@@ -1849,7 +1966,9 @@ export {
   load_admin_users,
   render_admin_backups,
   load_admin_backups,
-  prompt_delete_admin_user,
+  enter_admin_delete_mode,
+  exit_admin_delete_mode,
+  prompt_delete_selected_admin_users,
   hide_delete_admin_user_toast,
   confirm_delete_admin_user,
   init_admin_panel,

@@ -73,6 +73,8 @@ describe('Admin Panel JS (users filter, lazy zonefile loading, backups)', () => 
       'admin-delete-toast-error': makeElement('div', 'admin-delete-toast-error'),
       'admin-delete-toast-confirm': makeElement('button', 'admin-delete-toast-confirm'),
       'admin-delete-toast-cancel': makeElement('button', 'admin-delete-toast-cancel'),
+      'admin-delete-mode-btn': makeElement('button', 'admin-delete-mode-btn'),
+      'admin-delete-users-btn': makeElement('button', 'admin-delete-users-btn'),
     };
 
     const origGetById = dom.document.getElementById;
@@ -176,7 +178,7 @@ describe('Admin Panel JS (users filter, lazy zonefile loading, backups)', () => 
     assert.equal(fetchedUrls.length, 2);
   });
 
-  it('shows confirmation toast on delete click, supports cancel, and deletes on confirm', async () => {
+  it('supports multi-select delete mode, toggle selection, cancel, and confirmed bulk deletion', async () => {
     const calls = [];
     globalThis.fetch = async (url, opts = {}) => {
       calls.push({ url, method: opts.method || 'GET' });
@@ -192,47 +194,102 @@ describe('Admin Panel JS (users filter, lazy zonefile loading, backups)', () => 
           }),
         };
       }
-      if (url === '/app/admin/users/alice' && opts.method === 'DELETE') {
+      if ((url === '/app/admin/users/alice' || url === '/app/admin/users/bob') && opts.method === 'DELETE') {
         return {
           ok: true,
-          json: async () => ({ status: 'deleted', username: 'alice' }),
+          json: async () => ({ status: 'deleted' }),
         };
       }
       throw new Error(`Unexpected fetch: ${opts.method || 'GET'} ${url}`);
     };
 
+    const deleteModeBtn = adminElements['admin-delete-mode-btn'];
+    const deleteUsersBtn = adminElements['admin-delete-users-btn'];
+    deleteModeBtn.innerHTML = '<i class="bi bi-trash me-1"></i>Delete users';
+    deleteUsersBtn.classList.add('d-none');
+    deleteUsersBtn.disabled = true;
+
     main.init_admin_panel();
     adminElements['admin-tab'].trigger('shown.bs.tab');
     await new Promise(r => setImmediate(r));
 
-    // Current admin user row has no delete button
+    // Initially no checkboxes or trash icons on user rows, action button hidden
+    assert.equal(adminElements['admin-users-list'].children[1].children[0].children.length, 1);
+    assert.equal(deleteUsersBtn.classList.contains('d-none'), true);
+
+    // Enter selection mode via 'Delete users'
+    deleteModeBtn.trigger('click');
+    assert.match(deleteModeBtn.innerHTML, /Exit user deletion/);
+    assert.equal(deleteUsersBtn.classList.contains('d-none'), false);
+    assert.equal(deleteUsersBtn.disabled, true);
+    assert.equal(deleteUsersBtn.textContent, 'Select users to delete');
+
+    // Exiting selection mode restores normal state
+    deleteModeBtn.trigger('click');
+    assert.match(deleteModeBtn.innerHTML, /Delete users/);
+    assert.equal(deleteUsersBtn.classList.contains('d-none'), true);
+    assert.equal(adminElements['admin-users-list'].children[1].children[0].children.length, 1);
+
+    // Re-enter selection mode
+    deleteModeBtn.trigger('click');
+
+    // Self row still has no checkbox; other rows have checkbox + headerBtn
     const selfRowHeader = adminElements['admin-users-list'].children[0].children[0];
     assert.equal(selfRowHeader.children.length, 1);
 
-    // Click delete button on alice
-    const aliceDeleteBtn = adminElements['admin-users-list'].children[1].children[0].children[1];
-    aliceDeleteBtn.trigger('click');
+    const aliceRowHeader = adminElements['admin-users-list'].children[1].children[0];
+    const aliceCheckbox = aliceRowHeader.children[0];
+    const aliceHeaderBtn = aliceRowHeader.children[1];
+    assert.equal(aliceCheckbox.type, 'checkbox');
+    assert.equal(aliceCheckbox.checked, false);
 
+    // Clicking anywhere in alice's entry selects alice and enables button
+    aliceHeaderBtn.trigger('click');
+    assert.equal(aliceCheckbox.checked, true);
+    assert.equal(deleteUsersBtn.disabled, false);
+    assert.equal(deleteUsersBtn.textContent, 'Delete selected users');
+
+    // Clicking again unselects alice and disables button
+    aliceHeaderBtn.trigger('click');
+    assert.equal(aliceCheckbox.checked, false);
+    assert.equal(deleteUsersBtn.disabled, true);
+    assert.equal(deleteUsersBtn.textContent, 'Select users to delete');
+
+    // Select both alice and bob (via row click and checkbox change)
+    aliceHeaderBtn.trigger('click');
+    const bobRowHeader = adminElements['admin-users-list'].children[2].children[0];
+    const bobCheckbox = bobRowHeader.children[0];
+    bobCheckbox.checked = true;
+    bobCheckbox.trigger('change');
+
+    assert.equal(deleteUsersBtn.disabled, false);
+    assert.equal(deleteUsersBtn.textContent, 'Delete selected users');
+
+    // Click 'Delete selected users' -> shows confirmation toast
+    deleteUsersBtn.trigger('click');
     assert.equal(adminElements['admin-delete-user-toast'].classList.contains('show'), true);
-    assert.equal(adminElements['admin-delete-toast-username'].textContent, 'alice');
+    assert.equal(adminElements['admin-delete-toast-username'].textContent, 'alice, bob');
 
-    // Cancel hides toast without sending DELETE
+    // Cancel toast -> hides toast without sending DELETE
     adminElements['admin-delete-toast-cancel'].trigger('click');
     assert.equal(adminElements['admin-delete-user-toast'].classList.contains('show'), false);
     assert.equal(calls.filter(c => c.method === 'DELETE').length, 0);
 
-    // Click delete again and confirm
-    aliceDeleteBtn.trigger('click');
+    // Confirm deletion -> sends DELETE for alice and bob, removes them, exits selection mode
+    deleteUsersBtn.trigger('click');
     adminElements['admin-delete-toast-confirm'].trigger('click');
     await new Promise(r => setImmediate(r));
 
     assert.deepEqual(calls, [
       { url: '/app/admin/users', method: 'GET' },
       { url: '/app/admin/users/alice', method: 'DELETE' },
+      { url: '/app/admin/users/bob', method: 'DELETE' },
     ]);
     assert.equal(adminElements['admin-delete-user-toast'].classList.contains('show'), false);
-    assert.equal(adminElements['admin-users-list'].children.length, 2);
-    assert.match(adminElements['admin-users-list'].children[1].children[0].children[0].innerHTML, /bob/);
+    assert.equal(adminElements['admin-users-list'].children.length, 1);
+    assert.match(adminElements['admin-users-list'].children[0].children[0].children[0].innerHTML, /adminuser/);
+    assert.equal(deleteUsersBtn.classList.contains('d-none'), true);
+    assert.match(deleteModeBtn.innerHTML, /Delete users/);
   });
 
   it('loads and renders backup filenames in the Backups tab', async () => {

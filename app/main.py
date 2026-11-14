@@ -1,5 +1,6 @@
 import json
 import logging
+import secrets
 from urllib.parse import quote, unquote
 
 from fastapi import FastAPI, APIRouter, Request, HTTPException, status, Security, Query
@@ -53,6 +54,7 @@ app_router = APIRouter(prefix=APP_PREFIX)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 templates = Jinja2Templates(directory="templates/")
+templates.env.globals["asset_version"] = secrets.token_hex(4)
 zonemgr = ZoneManager(settings.root_domain)
 
 # For user tokens
