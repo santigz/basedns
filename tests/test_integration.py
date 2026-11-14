@@ -736,6 +736,158 @@ class TestDNSPlatformIntegration(unittest.TestCase):
         self.assertEqual(b"".join(still_ok[0].strings).decode("utf-8"), rsa2048_dkim)
 
 
+class TestAdminIntegration(unittest.TestCase):
+    """Integration tests for remote-groups authorization and Admin API/UI endpoints."""
+
+    @classmethod
+    def setUpClass(cls):
+        zones_dir = Path(USER_ZONES_DIR)
+        cls._initial_user_zones = {}
+        if zones_dir.exists():
+            for p in zones_dir.iterdir():
+                if p.is_file():
+                    cls._initial_user_zones[p.name] = p.read_text()
+
+        backups_dir = Path(BACKUPS_DIR)
+        cls._initial_backups = (
+            {p.name for p in backups_dir.iterdir() if p.is_file()}
+            if backups_dir.exists()
+            else set()
+        )
+
+    @classmethod
+    def tearDownClass(cls):
+        zones_dir = Path(USER_ZONES_DIR)
+        if zones_dir.exists():
+            for p in zones_dir.iterdir():
+                if p.is_file() and p.name not in cls._initial_user_zones:
+                    p.unlink()
+            for name, content in cls._initial_user_zones.items():
+                (zones_dir / name).write_text(content)
+
+        backups_dir = Path(BACKUPS_DIR)
+        if backups_dir.exists():
+            for p in backups_dir.iterdir():
+                if p.is_file() and p.name not in cls._initial_backups:
+                    p.unlink()
+
+        zm = ZoneManager(ROOT_DOMAIN)
+        zm.reset_main_zone()
+        zm.reset_named_conf_local()
+
+    def test_non_admin_user_cannot_access_admin_ui_or_api(self):
+        for headers in (
+            {"Remote-User": "regular_user"},
+            {"Remote-User": "regular_user", "Remote-Groups": "admin,editor,billing"},
+        ):
+            with self.subTest(headers=headers):
+                page = requests.get(f"{APP_URL}", headers=headers, timeout=REQUEST_TIMEOUT)
+                self.assertEqual(page.status_code, 200)
+                self.assertNotIn('id="admin-tab"', page.text)
+
+                self.assertEqual(
+                    requests.get(f"{APP_URL}/admin/users", headers=headers, timeout=REQUEST_TIMEOUT).status_code,
+                    403,
+                )
+                self.assertEqual(
+                    requests.get(
+                        f"{APP_URL}/admin/users/regular_user/zonefile",
+                        headers=headers,
+                        timeout=REQUEST_TIMEOUT,
+                    ).status_code,
+                    403,
+                )
+                self.assertEqual(
+                    requests.get(f"{APP_URL}/admin/backups", headers=headers, timeout=REQUEST_TIMEOUT).status_code,
+                    403,
+                )
+
+    def test_admin_ui_users_zonefile_and_backups(self):
+        admin_headers = {
+            "Remote-User": "adminuser",
+            "Remote-Groups": "editor, basedns-admin , billing",
+        }
+        alice_headers = {"Remote-User": "alice"}
+
+        # 1. Admin UI page shows Admin tab and Users/Backups sub-tabs
+        page = requests.get(f"{APP_URL}", headers=admin_headers, timeout=REQUEST_TIMEOUT)
+        self.assertEqual(page.status_code, 200)
+        self.assertIn('id="admin-tab"', page.text)
+        self.assertIn('id="admin-users-tab"', page.text)
+        self.assertIn('id="admin-backups-tab"', page.text)
+
+        # 2. Initialize alice, set a custom alias, and add a DNS record
+        self.assertEqual(
+            requests.get(f"{APP_URL}", headers=alice_headers, timeout=REQUEST_TIMEOUT).status_code,
+            200,
+        )
+        origin_resp = requests.post(
+            f"{APP_URL}/origin",
+            json={"subdomain": "alice-alias", "acknowledge": True},
+            headers=alice_headers,
+            timeout=REQUEST_TIMEOUT,
+        )
+        self.assertEqual(origin_resp.status_code, 200, origin_resp.text)
+
+        alice_zone = requests.get(
+            f"{APP_URL}/zonefile", headers=alice_headers, timeout=REQUEST_TIMEOUT
+        ).text
+        put_resp = requests.put(
+            f"{APP_URL}/zonefile",
+            data=alice_zone + "\nweb\tIN\tA\t192.0.2.55\n",
+            headers={**alice_headers, "Content-Type": "text/plain"},
+            timeout=REQUEST_TIMEOUT,
+        )
+        self.assertEqual(put_resp.status_code, 200, put_resp.text)
+
+        # 3. GET /app/admin/users lists users with alias and record_count
+        users_resp = requests.get(
+            f"{APP_URL}/admin/users", headers=admin_headers, timeout=REQUEST_TIMEOUT
+        )
+        self.assertEqual(users_resp.status_code, 200, users_resp.text)
+        users = users_resp.json()["users"]
+        by_name = {u["username"]: u for u in users}
+
+        self.assertIn("adminuser", by_name)
+        self.assertEqual(by_name["adminuser"]["alias"], "adminuser")
+        self.assertEqual(by_name["adminuser"]["record_count"], 3)
+
+        self.assertIn("alice", by_name)
+        self.assertEqual(by_name["alice"]["alias"], "alice-alias")
+        self.assertEqual(by_name["alice"]["record_count"], 4)
+
+        # 4. GET /app/admin/users/{username}/zonefile returns zonefile on demand
+        alice_admin_zone = requests.get(
+            f"{APP_URL}/admin/users/alice/zonefile", headers=admin_headers, timeout=REQUEST_TIMEOUT
+        )
+        self.assertEqual(alice_admin_zone.status_code, 200)
+        self.assertIn("192.0.2.55", alice_admin_zone.text)
+        self.assertIn("alice-alias", alice_admin_zone.text)
+
+        # Non-existent user returns 404 and is not auto-created
+        missing_resp = requests.get(
+            f"{APP_URL}/admin/users/does-not-exist/zonefile",
+            headers=admin_headers,
+            timeout=REQUEST_TIMEOUT,
+        )
+        self.assertEqual(missing_resp.status_code, 404)
+        self.assertIsNone(ZoneManager(ROOT_DOMAIN).get_user_zonefile_path("does-not-exist"))
+
+        # 5. GET /app/admin/backups lists backup filenames
+        backups_dir = Path(BACKUPS_DIR)
+        backups_dir.mkdir(parents=True, exist_ok=True)
+        test_backup = backups_dir / "bind-2026-01-01_00-00-00.tar.gz"
+        test_backup.write_bytes(b"test-backup")
+        try:
+            backups_resp = requests.get(
+                f"{APP_URL}/admin/backups", headers=admin_headers, timeout=REQUEST_TIMEOUT
+            )
+            self.assertEqual(backups_resp.status_code, 200, backups_resp.text)
+            self.assertIn("bind-2026-01-01_00-00-00.tar.gz", backups_resp.json()["backups"])
+        finally:
+            test_backup.unlink(missing_ok=True)
+
+
 if __name__ == "__main__":
     print(
         f"Running integration tests against HTTP={BASE_URL} and DNS={HOST}:{DNS_PORT} (zone: {USER_ORIGIN})"

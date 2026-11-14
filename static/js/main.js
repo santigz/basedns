@@ -533,6 +533,7 @@ function init_page() {
   set_input_validations();
   set_input_previews();
   set_change_origin_listeners();
+  init_admin_panel();
 }
 
 function create_record_a(button) {
@@ -1408,6 +1409,215 @@ function change_origin() {
     });
 }
 
+var admin_users_cache = [];
+var admin_users_loaded = false;
+var admin_backups_loaded = false;
+var admin_zone_cache = new Map();
+
+/**
+  * Filters admin user objects by username (case-insensitive substring match).
+  *
+  * @param {Array<{username: string, alias: string, record_count: number}>} users
+  * @param {string} query
+  * @returns {Array<{username: string, alias: string, record_count: number}>}
+  */
+function filter_admin_users(users, query) {
+  const q = (query || '').trim().toLowerCase();
+  if (!q) {
+    return users;
+  }
+  return users.filter(u => String(u.username || '').toLowerCase().includes(q));
+}
+
+function render_admin_users(users, container) {
+  if (!container) return;
+  container.innerHTML = '';
+  const statusEl = document.getElementById('admin-users-status');
+  if (!users || users.length === 0) {
+    if (statusEl) {
+      statusEl.textContent = admin_users_cache.length === 0
+        ? 'No user zones found.'
+        : 'No matching users.';
+    }
+    return;
+  }
+  if (statusEl) {
+    statusEl.textContent = `Showing ${users.length} user${users.length === 1 ? '' : 's'}`;
+  }
+
+  for (const user of users) {
+    const item = document.createElement('div');
+    item.className = 'list-group-item p-0';
+
+    const headerBtn = document.createElement('button');
+    headerBtn.type = 'button';
+    headerBtn.className = 'btn btn-link text-decoration-none text-body w-100 d-flex justify-content-between align-items-center px-3 py-2 text-start';
+    headerBtn.setAttribute('aria-expanded', 'false');
+    headerBtn.innerHTML =
+      `<span>` +
+        `<strong class="font-monospace">${escape_html(user.username)}</strong>` +
+        `<span class="text-body-secondary ms-2 small">alias: <code>${escape_html(user.alias)}</code></span>` +
+      `</span>` +
+      `<span class="badge text-bg-secondary rounded-pill">${escape_html(user.record_count)} record${user.record_count === 1 ? '' : 's'}</span>`;
+
+    const zoneWrapper = document.createElement('div');
+    zoneWrapper.className = 'd-none border-top bg-body-tertiary p-3';
+
+    const zonePre = document.createElement('pre');
+    zonePre.className = 'mb-0 small font-monospace';
+    zonePre.style.whiteSpace = 'pre-wrap';
+    zoneWrapper.appendChild(zonePre);
+
+    headerBtn.addEventListener('click', () => {
+      toggle_admin_user_zone(user.username, headerBtn, zoneWrapper, zonePre);
+    });
+
+    item.appendChild(headerBtn);
+    item.appendChild(zoneWrapper);
+    container.appendChild(item);
+  }
+}
+
+async function toggle_admin_user_zone(username, headerBtn, zoneWrapper, zonePre) {
+  const isExpanded = headerBtn.getAttribute('aria-expanded') === 'true';
+  if (isExpanded) {
+    headerBtn.setAttribute('aria-expanded', 'false');
+    zoneWrapper.classList.add('d-none');
+    return;
+  }
+
+  headerBtn.setAttribute('aria-expanded', 'true');
+  zoneWrapper.classList.remove('d-none');
+
+  if (admin_zone_cache.has(username)) {
+    zonePre.textContent = admin_zone_cache.get(username);
+    return;
+  }
+
+  zonePre.textContent = 'Loading zone file...';
+  try {
+    const response = await fetch(`${APP_PREFIX}/admin/users/${encodeURIComponent(username)}/zonefile`);
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    const text = await response.text();
+    admin_zone_cache.set(username, text);
+    zonePre.textContent = text;
+  } catch (err) {
+    zonePre.textContent = `Failed to load zone file: ${err.message}`;
+  }
+}
+
+async function load_admin_users() {
+  const container = document.getElementById('admin-users-list');
+  const statusEl = document.getElementById('admin-users-status');
+  if (!container) return;
+
+  if (statusEl) {
+    statusEl.textContent = 'Loading users...';
+  }
+  try {
+    const response = await fetch(`${APP_PREFIX}/admin/users`);
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    const data = await response.json();
+    admin_users_cache = Array.isArray(data.users) ? data.users : [];
+    admin_users_loaded = true;
+    const searchInput = document.getElementById('admin-user-search');
+    const query = searchInput ? searchInput.value : '';
+    render_admin_users(filter_admin_users(admin_users_cache, query), container);
+  } catch (err) {
+    if (statusEl) {
+      statusEl.textContent = `Failed to load users: ${err.message}`;
+    }
+  }
+}
+
+function render_admin_backups(backups, container) {
+  if (!container) return;
+  container.innerHTML = '';
+  const statusEl = document.getElementById('admin-backups-status');
+  if (!backups || backups.length === 0) {
+    if (statusEl) {
+      statusEl.textContent = 'No backups found.';
+    }
+    return;
+  }
+  if (statusEl) {
+    statusEl.textContent = `${backups.length} backup${backups.length === 1 ? '' : 's'}`;
+  }
+  for (const filename of backups) {
+    const li = document.createElement('li');
+    li.className = 'list-group-item font-monospace small';
+    li.textContent = filename;
+    container.appendChild(li);
+  }
+}
+
+async function load_admin_backups() {
+  const container = document.getElementById('admin-backups-list');
+  const statusEl = document.getElementById('admin-backups-status');
+  if (!container) return;
+
+  if (statusEl) {
+    statusEl.textContent = 'Loading backups...';
+  }
+  try {
+    const response = await fetch(`${APP_PREFIX}/admin/backups`);
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    const data = await response.json();
+    const backups = Array.isArray(data.backups) ? data.backups : [];
+    admin_backups_loaded = true;
+    render_admin_backups(backups, container);
+  } catch (err) {
+    if (statusEl) {
+      statusEl.textContent = `Failed to load backups: ${err.message}`;
+    }
+  }
+}
+
+function reset_admin_state() {
+  admin_users_cache = [];
+  admin_users_loaded = false;
+  admin_backups_loaded = false;
+  admin_zone_cache = new Map();
+}
+
+function init_admin_panel() {
+  const adminTab = document.getElementById('admin-tab');
+  if (!adminTab) return;
+
+  const loadUsersIfNeeded = () => {
+    if (!admin_users_loaded) {
+      load_admin_users();
+    }
+  };
+  adminTab.addEventListener('shown.bs.tab', loadUsersIfNeeded);
+  adminTab.addEventListener('click', loadUsersIfNeeded);
+
+  const backupsTab = document.getElementById('admin-backups-tab');
+  if (backupsTab) {
+    const loadBackupsIfNeeded = () => {
+      if (!admin_backups_loaded) {
+        load_admin_backups();
+      }
+    };
+    backupsTab.addEventListener('shown.bs.tab', loadBackupsIfNeeded);
+    backupsTab.addEventListener('click', loadBackupsIfNeeded);
+  }
+
+  const searchInput = document.getElementById('admin-user-search');
+  if (searchInput) {
+    searchInput.addEventListener('input', () => {
+      const container = document.getElementById('admin-users-list');
+      render_admin_users(filter_admin_users(admin_users_cache, searchInput.value), container);
+    });
+  }
+}
+
 if (typeof window !== 'undefined') {
   Object.assign(window, {
     create_record_a,
@@ -1509,4 +1719,12 @@ export {
   get_zone,
   set_user_origin,
   get_user_origin,
+  filter_admin_users,
+  render_admin_users,
+  toggle_admin_user_zone,
+  load_admin_users,
+  render_admin_backups,
+  load_admin_backups,
+  init_admin_panel,
+  reset_admin_state,
 };

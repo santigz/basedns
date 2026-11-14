@@ -19,14 +19,17 @@ from .dns_manager import (
     SubdomainUnavailableError,
 )
 
+ADMIN_GROUP = "basedns-admin"
+APP_PREFIX = "/app"
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
-
     root_domain: str = "example.com."
     website_url: str = "http://localhost"
     testing_mode: bool = False
     testing_user: str = 'user'
+    testing_groups: str = ADMIN_GROUP
     logout_url: str = ""
 
 
@@ -44,8 +47,6 @@ def encode_logout_url(url: str) -> str:
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.DEBUG)
 
-APP_PREFIX = "/app"
-
 settings = Settings()
 app = FastAPI()
 app_router = APIRouter(prefix=APP_PREFIX)
@@ -58,12 +59,37 @@ zonemgr = ZoneManager(settings.root_domain)
 api_key_query = APIKeyQuery(name="api_key", auto_error=False)
 api_key_header = APIKeyHeader(name="x-api-key", auto_error=False)
 
+
+
 def check_user(request):
     username = request.headers.get('remote-user')
     if not username and settings.testing_mode:
         username = settings.testing_user
     if not username:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid user.")
+    return username
+
+
+def get_user_groups(request: Request) -> list[str]:
+    raw_groups = request.headers.get('remote-groups')
+    if raw_groups is None and settings.testing_mode:
+        raw_groups = settings.testing_groups
+    if not raw_groups:
+        return []
+    return [g.strip() for g in raw_groups.split(',') if g.strip()]
+
+
+def is_admin(request: Request) -> bool:
+    return ADMIN_GROUP in get_user_groups(request)
+
+
+def check_admin(request: Request) -> str:
+    username = check_user(request)
+    if not is_admin(request):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin access required.",
+        )
     return username
 
 
@@ -93,6 +119,7 @@ async def read_app(request: Request):
             "website_url": settings.website_url,
             "app_prefix": APP_PREFIX,
             "logout_url": encode_logout_url(settings.logout_url),
+            "is_admin": is_admin(request),
           }
     return templates.TemplateResponse(request=request, name="html/user.html", context=ctx)
 
@@ -103,6 +130,30 @@ async def read_headers(request: Request):
     # TODO: check user belongs to group dns_admin
     headers = dict(request.headers)
     return JSONResponse(content=headers)
+
+
+@app_router.get('/admin/users')
+def admin_list_users(request: Request):
+    check_admin(request)
+    return {"users": zonemgr.list_users_summary()}
+
+
+@app_router.get('/admin/users/{username}/zonefile', response_class=PlainTextResponse)
+def admin_read_user_zone(request: Request, username: str):
+    check_admin(request)
+    zone = zonemgr.read_existing_user_zonefile(username)
+    if zone is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User zone not found.",
+        )
+    return zone
+
+
+@app_router.get('/admin/backups')
+def admin_list_backups(request: Request):
+    check_admin(request)
+    return {"backups": zonemgr.list_backups()}
 
 
 

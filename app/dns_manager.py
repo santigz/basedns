@@ -323,6 +323,48 @@ class ZoneManager(object):
     def find_user_list(self):
         return list(self.find_user_zones().values())
 
+    def count_zone_records(self, zonefile_path: Path, origin: str) -> int:
+        try:
+            zone = dns.zone.from_file(str(zonefile_path), origin=origin, relativize=False)
+            return sum(
+                len(rdataset)
+                for node in zone.nodes.values()
+                for rdataset in node.rdatasets
+            )
+        except Exception as e:
+            logger.warning(f'Failed counting records in {zonefile_path}: {e}')
+            return 0
+
+    def list_users_summary(self) -> list[dict]:
+        users = []
+        for username, subdomain in sorted(
+            self.find_user_zones().items(), key=lambda item: item[0].lower()
+        ):
+            zonefile = Path(USER_ZONES_DIR) / self.user_zone_filename(username, subdomain)
+            origin = f'{subdomain}.{self.origin}'
+            users.append({
+                'username': username,
+                'alias': subdomain,
+                'origin': origin,
+                'record_count': self.count_zone_records(zonefile, origin),
+            })
+        return users
+
+    def read_existing_user_zonefile(self, username: str) -> str | None:
+        zonefile = self.get_user_zonefile_path(username)
+        if zonefile is None or not zonefile.exists():
+            return None
+        return zonefile.read_text()
+
+    def list_backups(self) -> list[str]:
+        backups_dir = Path(BACKUPS_DIR)
+        if not backups_dir.exists():
+            return []
+        return sorted(
+            (p.name for p in backups_dir.iterdir() if p.is_file() and not p.name.startswith('.')),
+            reverse=True,
+        )
+
     def _next_zone_serial(self, zonefile_path: str | Path) -> int:
         path = Path(zonefile_path)
         now_sec = int(datetime.now().timestamp())
