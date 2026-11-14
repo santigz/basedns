@@ -356,6 +356,17 @@ class ZoneManager(object):
             return None
         return zonefile.read_text()
 
+    def delete_user(self, username: str) -> bool:
+        zonefile = self.get_user_zonefile_path(username)
+        if zonefile is None or not zonefile.exists():
+            return False
+        zonefile.unlink(missing_ok=True)
+        zonefile.with_name(zonefile.name + '.orig').unlink(missing_ok=True)
+        self.delete_user_token(username)
+        self.reset_main_zone()
+        self.reset_named_conf_local()
+        return True
+
     def list_backups(self) -> list[str]:
         backups_dir = Path(BACKUPS_DIR)
         if not backups_dir.exists():

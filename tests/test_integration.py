@@ -801,6 +801,14 @@ class TestAdminIntegration(unittest.TestCase):
                     requests.get(f"{APP_URL}/admin/backups", headers=headers, timeout=REQUEST_TIMEOUT).status_code,
                     403,
                 )
+                self.assertEqual(
+                    requests.delete(
+                        f"{APP_URL}/admin/users/regular_user",
+                        headers=headers,
+                        timeout=REQUEST_TIMEOUT,
+                    ).status_code,
+                    403,
+                )
 
     def test_admin_ui_users_zonefile_and_backups(self):
         admin_headers = {
@@ -873,7 +881,33 @@ class TestAdminIntegration(unittest.TestCase):
         self.assertEqual(missing_resp.status_code, 404)
         self.assertIsNone(ZoneManager(ROOT_DOMAIN).get_user_zonefile_path("does-not-exist"))
 
-        # 5. GET /app/admin/backups lists backup filenames
+        # 5. Admin cannot delete their own user
+        self_del_resp = requests.delete(
+            f"{APP_URL}/admin/users/adminuser", headers=admin_headers, timeout=REQUEST_TIMEOUT
+        )
+        self.assertEqual(self_del_resp.status_code, 400, self_del_resp.text)
+        self.assertIsNotNone(ZoneManager(ROOT_DOMAIN).get_user_zonefile_path("adminuser"))
+
+        # 6. DELETE /app/admin/users/{username} deletes another user zone and returns 404 thereafter
+        del_resp = requests.delete(
+            f"{APP_URL}/admin/users/alice", headers=admin_headers, timeout=REQUEST_TIMEOUT
+        )
+        self.assertEqual(del_resp.status_code, 200, del_resp.text)
+        self.assertEqual(del_resp.json()["status"], "deleted")
+        self.assertIsNone(ZoneManager(ROOT_DOMAIN).get_user_zonefile_path("alice"))
+
+        users_after_del = requests.get(
+            f"{APP_URL}/admin/users", headers=admin_headers, timeout=REQUEST_TIMEOUT
+        ).json()["users"]
+        self.assertNotIn("alice", {u["username"] for u in users_after_del})
+        self.assertEqual(
+            requests.delete(
+                f"{APP_URL}/admin/users/alice", headers=admin_headers, timeout=REQUEST_TIMEOUT
+            ).status_code,
+            404,
+        )
+
+        # 6. GET /app/admin/backups lists backup filenames
         backups_dir = Path(BACKUPS_DIR)
         backups_dir.mkdir(parents=True, exist_ok=True)
         test_backup = backups_dir / "bind-2026-01-01_00-00-00.tar.gz"

@@ -72,7 +72,7 @@ def check_user(request):
 
 def get_user_groups(request: Request) -> list[str]:
     raw_groups = request.headers.get('remote-groups')
-    if raw_groups is None and settings.testing_mode:
+    if raw_groups is None and not request.headers.get('remote-user') and settings.testing_mode:
         raw_groups = settings.testing_groups
     if not raw_groups:
         return []
@@ -148,6 +148,22 @@ def admin_read_user_zone(request: Request, username: str):
             detail="User zone not found.",
         )
     return zone
+
+
+@app_router.delete('/admin/users/{username}')
+def admin_delete_user(request: Request, username: str):
+    admin_username = check_admin(request)
+    if username == admin_username:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="You cannot delete your own user.",
+        )
+    if not zonemgr.delete_user(username):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found.",
+        )
+    return {"status": "deleted", "username": username}
 
 
 @app_router.get('/admin/backups')

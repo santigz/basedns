@@ -68,11 +68,23 @@ describe('Admin Panel JS (users filter, lazy zonefile loading, backups)', () => 
       'admin-users-list': makeElement('div', 'admin-users-list'),
       'admin-backups-status': makeElement('div', 'admin-backups-status'),
       'admin-backups-list': makeElement('ul', 'admin-backups-list'),
+      'admin-delete-user-toast': makeElement('div', 'admin-delete-user-toast'),
+      'admin-delete-toast-username': makeElement('strong', 'admin-delete-toast-username'),
+      'admin-delete-toast-error': makeElement('div', 'admin-delete-toast-error'),
+      'admin-delete-toast-confirm': makeElement('button', 'admin-delete-toast-confirm'),
+      'admin-delete-toast-cancel': makeElement('button', 'admin-delete-toast-cancel'),
     };
 
     const origGetById = dom.document.getElementById;
     dom.document.getElementById = (id) => adminElements[id] || origGetById(id);
     dom.document.createElement = (tag) => makeElement(tag);
+    const origQuerySelector = dom.document.querySelector;
+    dom.document.querySelector = (sel) => {
+      if (sel === 'meta[name="current-user"]') {
+        return { content: 'adminuser' };
+      }
+      return origQuerySelector ? origQuerySelector(sel) : null;
+    };
 
     const mods = await loadDnsModules(dom);
     main = mods.main;
@@ -131,7 +143,8 @@ describe('Admin Panel JS (users filter, lazy zonefile loading, backups)', () => 
 
     // Clicking alice downloads alice's zonefile on demand and caches it
     const aliceItem = adminElements['admin-users-list'].children[0];
-    const aliceBtn = aliceItem.children[0];
+    const aliceRowHeader = aliceItem.children[0];
+    const aliceBtn = aliceRowHeader.children[0];
     const aliceWrapper = aliceItem.children[1];
     const alicePre = aliceWrapper.children[0];
 
@@ -159,8 +172,67 @@ describe('Admin Panel JS (users filter, lazy zonefile loading, backups)', () => 
     adminElements['admin-user-search'].value = 'bob';
     adminElements['admin-user-search'].trigger('input');
     assert.equal(adminElements['admin-users-list'].children.length, 1);
-    assert.match(adminElements['admin-users-list'].children[0].children[0].innerHTML, /bob/);
+    assert.match(adminElements['admin-users-list'].children[0].children[0].children[0].innerHTML, /bob/);
     assert.equal(fetchedUrls.length, 2);
+  });
+
+  it('shows confirmation toast on delete click, supports cancel, and deletes on confirm', async () => {
+    const calls = [];
+    globalThis.fetch = async (url, opts = {}) => {
+      calls.push({ url, method: opts.method || 'GET' });
+      if (url === '/app/admin/users' && (opts.method || 'GET') === 'GET') {
+        return {
+          ok: true,
+          json: async () => ({
+            users: [
+              { username: 'adminuser', alias: 'adminuser', record_count: 3 },
+              { username: 'alice', alias: 'alice', record_count: 3 },
+              { username: 'bob', alias: 'bob', record_count: 3 },
+            ],
+          }),
+        };
+      }
+      if (url === '/app/admin/users/alice' && opts.method === 'DELETE') {
+        return {
+          ok: true,
+          json: async () => ({ status: 'deleted', username: 'alice' }),
+        };
+      }
+      throw new Error(`Unexpected fetch: ${opts.method || 'GET'} ${url}`);
+    };
+
+    main.init_admin_panel();
+    adminElements['admin-tab'].trigger('shown.bs.tab');
+    await new Promise(r => setImmediate(r));
+
+    // Current admin user row has no delete button
+    const selfRowHeader = adminElements['admin-users-list'].children[0].children[0];
+    assert.equal(selfRowHeader.children.length, 1);
+
+    // Click delete button on alice
+    const aliceDeleteBtn = adminElements['admin-users-list'].children[1].children[0].children[1];
+    aliceDeleteBtn.trigger('click');
+
+    assert.equal(adminElements['admin-delete-user-toast'].classList.contains('show'), true);
+    assert.equal(adminElements['admin-delete-toast-username'].textContent, 'alice');
+
+    // Cancel hides toast without sending DELETE
+    adminElements['admin-delete-toast-cancel'].trigger('click');
+    assert.equal(adminElements['admin-delete-user-toast'].classList.contains('show'), false);
+    assert.equal(calls.filter(c => c.method === 'DELETE').length, 0);
+
+    // Click delete again and confirm
+    aliceDeleteBtn.trigger('click');
+    adminElements['admin-delete-toast-confirm'].trigger('click');
+    await new Promise(r => setImmediate(r));
+
+    assert.deepEqual(calls, [
+      { url: '/app/admin/users', method: 'GET' },
+      { url: '/app/admin/users/alice', method: 'DELETE' },
+    ]);
+    assert.equal(adminElements['admin-delete-user-toast'].classList.contains('show'), false);
+    assert.equal(adminElements['admin-users-list'].children.length, 2);
+    assert.match(adminElements['admin-users-list'].children[1].children[0].children[0].innerHTML, /bob/);
   });
 
   it('loads and renders backup filenames in the Backups tab', async () => {

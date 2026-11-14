@@ -1413,6 +1413,7 @@ var admin_users_cache = [];
 var admin_users_loaded = false;
 var admin_backups_loaded = false;
 var admin_zone_cache = new Map();
+var pending_delete_username = null;
 
 /**
   * Filters admin user objects by username (case-insensitive substring match).
@@ -1427,6 +1428,13 @@ function filter_admin_users(users, query) {
     return users;
   }
   return users.filter(u => String(u.username || '').toLowerCase().includes(q));
+}
+
+function get_current_username() {
+  if (typeof document === 'undefined' || !document.querySelector) {
+    return '';
+  }
+  return document.querySelector('meta[name="current-user"]')?.content || '';
 }
 
 function render_admin_users(users, container) {
@@ -1449,9 +1457,12 @@ function render_admin_users(users, container) {
     const item = document.createElement('div');
     item.className = 'list-group-item p-0';
 
+    const rowHeader = document.createElement('div');
+    rowHeader.className = 'd-flex align-items-center';
+
     const headerBtn = document.createElement('button');
     headerBtn.type = 'button';
-    headerBtn.className = 'btn btn-link text-decoration-none text-body w-100 d-flex justify-content-between align-items-center px-3 py-2 text-start';
+    headerBtn.className = 'btn btn-link text-decoration-none text-body flex-grow-1 d-flex justify-content-between align-items-center px-3 py-2 text-start';
     headerBtn.setAttribute('aria-expanded', 'false');
     headerBtn.innerHTML =
       `<span>` +
@@ -1459,6 +1470,21 @@ function render_admin_users(users, container) {
         `<span class="text-body-secondary ms-2 small">alias: <code>${escape_html(user.alias)}</code></span>` +
       `</span>` +
       `<span class="badge text-bg-secondary rounded-pill">${escape_html(user.record_count)} record${user.record_count === 1 ? '' : 's'}</span>`;
+
+    const currentUsername = get_current_username();
+
+    rowHeader.appendChild(headerBtn);
+    if (user.username !== currentUsername) {
+      const deleteBtn = document.createElement('button');
+      deleteBtn.type = 'button';
+      deleteBtn.className = 'btn btn-sm btn-outline-danger me-3 flex-shrink-0';
+      deleteBtn.setAttribute('aria-label', `Delete ${user.username}`);
+      deleteBtn.innerHTML = '<i class="bi bi-trash"></i>';
+      deleteBtn.addEventListener('click', () => {
+        prompt_delete_admin_user(user.username);
+      });
+      rowHeader.appendChild(deleteBtn);
+    }
 
     const zoneWrapper = document.createElement('div');
     zoneWrapper.className = 'd-none border-top bg-body-tertiary p-3';
@@ -1472,7 +1498,7 @@ function render_admin_users(users, container) {
       toggle_admin_user_zone(user.username, headerBtn, zoneWrapper, zonePre);
     });
 
-    item.appendChild(headerBtn);
+    item.appendChild(rowHeader);
     item.appendChild(zoneWrapper);
     container.appendChild(item);
   }
@@ -1579,11 +1605,99 @@ async function load_admin_backups() {
   }
 }
 
+function prompt_delete_admin_user(username) {
+  if (username === get_current_username()) return;
+  pending_delete_username = username;
+  const usernameEl = document.getElementById('admin-delete-toast-username');
+  if (usernameEl) {
+    usernameEl.textContent = username;
+  }
+  const errorEl = document.getElementById('admin-delete-toast-error');
+  if (errorEl) {
+    errorEl.textContent = '';
+    errorEl.classList.add('d-none');
+  }
+  const confirmBtn = document.getElementById('admin-delete-toast-confirm');
+  if (confirmBtn) {
+    confirmBtn.disabled = false;
+  }
+  const toastEl = document.getElementById('admin-delete-user-toast');
+  if (toastEl) {
+    if (typeof bootstrap !== 'undefined' && bootstrap.Toast) {
+      bootstrap.Toast.getOrCreateInstance(toastEl).show();
+    } else {
+      toastEl.classList.add('show');
+    }
+  }
+}
+
+function hide_delete_admin_user_toast() {
+  pending_delete_username = null;
+  const toastEl = document.getElementById('admin-delete-user-toast');
+  if (toastEl) {
+    if (typeof bootstrap !== 'undefined' && bootstrap.Toast) {
+      bootstrap.Toast.getOrCreateInstance(toastEl).hide();
+    } else {
+      toastEl.classList.remove('show');
+    }
+  }
+}
+
+async function confirm_delete_admin_user() {
+  const username = pending_delete_username;
+  if (!username) return;
+
+  const confirmBtn = document.getElementById('admin-delete-toast-confirm');
+  const errorEl = document.getElementById('admin-delete-toast-error');
+  if (confirmBtn) {
+    confirmBtn.disabled = true;
+  }
+  if (errorEl) {
+    errorEl.textContent = '';
+    errorEl.classList.add('d-none');
+  }
+
+  try {
+    const response = await fetch(`${APP_PREFIX}/admin/users/${encodeURIComponent(username)}`, {
+      method: 'DELETE',
+    });
+    if (!response.ok) {
+      let msg = `HTTP ${response.status}`;
+      try {
+        const data = await response.json();
+        if (data && data.detail) {
+          msg = typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail);
+        }
+      } catch {
+        // Ignore JSON parse failure
+      }
+      throw new Error(msg);
+    }
+
+    admin_users_cache = admin_users_cache.filter(u => u.username !== username);
+    admin_zone_cache.delete(username);
+    const searchInput = document.getElementById('admin-user-search');
+    const query = searchInput ? searchInput.value : '';
+    const container = document.getElementById('admin-users-list');
+    render_admin_users(filter_admin_users(admin_users_cache, query), container);
+    hide_delete_admin_user_toast();
+  } catch (err) {
+    if (confirmBtn) {
+      confirmBtn.disabled = false;
+    }
+    if (errorEl) {
+      errorEl.textContent = `Failed to delete user: ${err.message}`;
+      errorEl.classList.remove('d-none');
+    }
+  }
+}
+
 function reset_admin_state() {
   admin_users_cache = [];
   admin_users_loaded = false;
   admin_backups_loaded = false;
   admin_zone_cache = new Map();
+  pending_delete_username = null;
 }
 
 function init_admin_panel() {
@@ -1615,6 +1729,16 @@ function init_admin_panel() {
       const container = document.getElementById('admin-users-list');
       render_admin_users(filter_admin_users(admin_users_cache, searchInput.value), container);
     });
+  }
+
+  const confirmDeleteBtn = document.getElementById('admin-delete-toast-confirm');
+  if (confirmDeleteBtn) {
+    confirmDeleteBtn.addEventListener('click', confirm_delete_admin_user);
+  }
+
+  const cancelDeleteBtn = document.getElementById('admin-delete-toast-cancel');
+  if (cancelDeleteBtn) {
+    cancelDeleteBtn.addEventListener('click', hide_delete_admin_user_toast);
   }
 }
 
@@ -1725,6 +1849,9 @@ export {
   load_admin_users,
   render_admin_backups,
   load_admin_backups,
+  prompt_delete_admin_user,
+  hide_delete_admin_user_toast,
+  confirm_delete_admin_user,
   init_admin_panel,
   reset_admin_state,
 };
